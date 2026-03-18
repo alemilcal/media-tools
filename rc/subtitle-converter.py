@@ -271,6 +271,8 @@ def convert_ass_to_srt(input_file, output_file):
     for i in range(len(subs) - 1):
         if subs[i]["end"] > subs[i + 1]["start"]:
             subs[i]["end"] = subs[i + 1]["start"]
+        if subs[i]["end"] - subs[i]["start"] < 100:
+            subs[i]["end"] = subs[i]["start"] + 100
 
     # DURACIÓN MÍNIMA (Criterio 2: 1cs)
     subs = subs[(subs["end"] - subs["start"]) >= 1]

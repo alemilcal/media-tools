@@ -38,12 +38,19 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         print(f"Error: El directorio de origen '{origen}' no existe.")
         return
 
+    # Comprobamos si la ruta de origen termina en barra para decidir el destino base
+    # Si no termina en barra, añadimos el nombre de la carpeta de origen al destino
+    if origen_raw.endswith(os.sep) or (os.altsep and origen_raw.endswith(os.altsep)):
+        base_destino = destino
+    else:
+        base_destino = os.path.join(destino, os.path.basename(origen))
+
     # Recorremos el árbol de directorios de origen
     for root, dirs, files in os.walk(origen):
         dirs.sort()
         # 1. Calculamos la ruta relativa respecto al origen para replicarla en el destino
         rel_path = os.path.relpath(root, origen)
-        target_dir = os.path.normpath(os.path.join(destino, rel_path))
+        target_dir = os.path.normpath(os.path.join(base_destino, rel_path))
 
         # 2. Creamos la carpeta en el destino si no existe
         if not os.path.exists(target_dir):
@@ -67,7 +74,7 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                 if cartoon:
                     subextension += ".crt"
                 ruta_salida = os.path.join(
-                    target_dir, nombre_base + subextension + ".mkv"
+                    target_dir, nombre_base + subextension + ".mp4"
                 )
 
                 # Definimos la ruta completa del log para no tener dudas

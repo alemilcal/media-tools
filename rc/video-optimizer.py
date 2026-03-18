@@ -18,12 +18,15 @@ import traceback
 
 
 AUDIO_BITRATE = "128"
+AUDIO_BITRATE_LQ = "32"
 AUDIO_CODEC = "aac"
 VIDEO_WIDTH = "1280"
+VIDEO_WIDTH_LQ = "640"
 VIDEO_CODEC = "libx264"
 VIDEO_PRESET = "faster"
 VIDEO_PROFILE = "high"
 VIDEO_QUALITY = "20"
+VIDEO_QUALITY_LQ = "26"
 RE_TAGS = re.compile(r"\{[^{}]*\}")
 RE_UNKNOWN = re.compile(
     r"[\u3040-\u309F\u30A0-\u30FF\u4300-\u9faf\u3000-\u30ff\uff00-\uffff]"
@@ -68,6 +71,7 @@ def main():
     descripcion = "Video/Subtitle Optimizer"
     parser = argparse.ArgumentParser(description=descripcion)
     parser.add_argument("-c", action="store_true", help="cartoon mode")
+    parser.add_argument("-l", action="store_true", help="low quality mode")
     parser.add_argument("-r", action="store_true", help="remux only (no transcode)")
     parser.add_argument("-v", action="store_true", help="verbose mode")
     parser.add_argument("-x", action="store_true", help="extract subtitle tracks only")
@@ -100,26 +104,31 @@ def convertVideo():
     getSubtitleInfo()
     getSubtitleTrack()
 
-    o = "-movflags +faststart"
+    o = "-movflags +faststart -sn -map_metadata -1 -map_chapters -1"
     if args.r:
         o += " -c copy -map 0:v -map 0:a"
     else:
         tune = "animation" if args.c else "film"
+        videoWidth    = VIDEO_WIDTH_LQ   if args.l else VIDEO_WIDTH
+        videoQuality  = VIDEO_QUALITY_LQ if args.l else VIDEO_QUALITY
+        audioBitrate  = AUDIO_BITRATE_LQ if args.l else AUDIO_BITRATE
+        audioChannels = 1                if args.l else 2
+        audioSampling = "-ar 22050"      if args.l else ""
         o = (
-            f" -c:v libx264 -preset faster -profile:v high -max_muxing_queue_size 9999"
-            f" -crf 20 -tune {tune} -vf scale='1280:-2',format=yuv420p -map 0:v:0"
-            f" -c:a aac -ac 2 -b:a 128k"
+            f" -c:v {VIDEO_CODEC} -preset faster -profile:v high -max_muxing_queue_size 9999"
+            f" -crf {videoQuality} -tune {tune} -vf scale='{videoWidth}:-2',format=yuv420p -map 0:v:0"
+            f" -c:a {AUDIO_CODEC} -ac {audioChannels} -b:a {audioBitrate}k {audioSampling}"
         )
-        for k in AudioTrackSelected:
-            o += f" -map 0:a:{AudioTracks[k]['id']}"
-    o += " -sn -map_metadata -1"
+        for k in range(len(AudioTrackSelected)):
+            c = languageCode3Char(AudioTracks[AudioTrackSelected[k]]["language"])
+            o += f" -map 0:a:{AudioTracks[k]['id']} -metadata:s:a:{k} language={c}"
     for k in SubtitleTrackSelected:
         extractSubtitleTrack(SubtitleTracks[k]["id"])
 
     if not args.x:
         try:
             # 1. Creamos el temporal y lo cerramos al instante para liberar el bloqueo en Windows
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mkv")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
             tmp_path = tmp.name
             tmp.close()
 
@@ -130,13 +139,13 @@ def convertVideo():
                 )
 
                 # 3. Ejecutamos mkvpropedit
-                for k in range(len(AudioTrackSelected)):
-                    c = languageCode3Char(
-                        AudioTracks[AudioTrackSelected[k]]["language"]
-                    )
-                    executeCommand(
-                        f'{MKVPROPEDIT_BIN} "{tmp_path}" --edit track:a{k + 1} --set language={c}'
-                    )
+                #for k in range(len(AudioTrackSelected)):
+                #    c = languageCode3Char(
+                #        AudioTracks[AudioTrackSelected[k]]["language"]
+                #    )
+                #    executeCommand(
+                #        f'{MKVPROPEDIT_BIN} "{tmp_path}" --edit track:a{k + 1} --set language={c}'
+                #    )
 
                 # 4. Movemos el archivo final
                 output_dir = os.path.dirname(OutputFileName)

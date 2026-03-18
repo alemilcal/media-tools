@@ -10,7 +10,7 @@ INPUT="$1"
 # Cambia la extensión .mkv por .mp4 para el nombre de salida
 OUTPUT="${INPUT%.mkv}.mp4"
 
-ffmpeg -i "$INPUT" \
+ffmpeg -n -i "$INPUT" \
   -c copy \
   -map 0:v -map 0:a -sn \
   -movflags +faststart \

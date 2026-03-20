@@ -317,19 +317,23 @@ class MediaFile:
 
 def colorize_green(s):
   #return '\033[1;32;40m{}\033[0;0m'.format(s)
-  return '\033[0;0;42m{}\033[0;0m'.format(s)
+  #return '\033[0;0;42m{}\033[0;0m'.format(s)
+  return s
 
 def colorize_red(s):
   #return '\033[1;31;40m{}\033[0;0m'.format(s)
-  return '\033[0;0;41m{}\033[0;0m'.format(s)
+  #return '\033[0;0;41m{}\033[0;0m'.format(s)
+  return s
 
 def colorize_purple(s):
   #return '\033[1;35;40m{}\033[0;0m'.format(s)
-  return '\033[0;0;45m{}\033[0;0m'.format(s)
+  #return '\033[0;0;45m{}\033[0;0m'.format(s)
+  return s
 
 def colorize_yellow(s):
   #return '\033[1;33;40m{}\033[0;0m'.format(s)
-  return '\033[0;0;43m{}\033[0;0m'.format(s)
+  #return '\033[0;0;43m{}\033[0;0m'.format(s)
+  return s
 
 def colorize_blue(s):
   #return '\033[1;36;40m{}\033[0;0m'.format(s)

@@ -53,9 +53,9 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         target_dir = os.path.normpath(os.path.join(base_destino, rel_path))
 
         # 2. Creamos la carpeta en el destino si no existe
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-            print(f"Carpeta creada: {target_dir}")
+        # if not os.path.exists(target_dir):
+        #     os.makedirs(target_dir)
+        #     print(f"Carpeta creada: {target_dir}")
 
         # 3. Procesamos los archivos
         for nombre_archivo in sorted(files):

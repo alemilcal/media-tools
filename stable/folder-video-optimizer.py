@@ -2,12 +2,30 @@
 # -*- coding: utf8 -*-
 
 
+import argparse
 import os
 import subprocess
 import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_OPTIMIZER_PY = os.path.join(BASE_DIR, "video-optimizer.py")
+
+
+def main():
+
+    global args
+
+    descripcion = "Folder Video Optimizer"
+    parser = argparse.ArgumentParser(description=descripcion)
+    parser.add_argument("-c", action="store_true", help="cartoon mode")
+    parser.add_argument("input", nargs=1, help="input folder")
+    parser.add_argument("output", nargs=1, help="output folder")
+    args = parser.parse_args()
+    print(f"{descripcion}...")
+    if len(sys.argv) < 3:
+        print(f"Uso: {sys.argv[0]} <directorio_entrada> <directorio_salida>")
+    else:
+        procesar_directorios(args.input[0], args.output[0], args.c)
 
 
 def procesar_directorios(origen_raw, destino_raw, cartoon):
@@ -20,12 +38,19 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         print(f"Error: El directorio de origen '{origen}' no existe.")
         return
 
+    # Comprobamos si la ruta de origen termina en barra para decidir el destino base
+    # Si no termina en barra, añadimos el nombre de la carpeta de origen al destino
+    if origen_raw.endswith(os.sep) or (os.altsep and origen_raw.endswith(os.altsep)):
+        base_destino = destino
+    else:
+        base_destino = os.path.join(destino, os.path.basename(origen))
+
     # Recorremos el árbol de directorios de origen
     for root, dirs, files in os.walk(origen):
         dirs.sort()
         # 1. Calculamos la ruta relativa respecto al origen para replicarla en el destino
         rel_path = os.path.relpath(root, origen)
-        target_dir = os.path.normpath(os.path.join(destino, rel_path))
+        target_dir = os.path.normpath(os.path.join(base_destino, rel_path))
 
         # 2. Creamos la carpeta en el destino si no existe
         if not os.path.exists(target_dir):
@@ -83,16 +108,4 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
 
 
 if __name__ == "__main__":
-    # Validamos que se pasen los dos parámetros
-    if len(sys.argv) < 3:
-        print(
-            "Uso: python folder-video-optimizer.py <directorio_origen> <directorio_destino> [-c]"
-        )
-        print("-c: modo cartoon")
-    else:
-        dir_1 = sys.argv[1]
-        dir_2 = sys.argv[2]
-        cartoon = False
-        if len(sys.argv) >= 4:
-            cartoon = sys.argv[3] == "-c"
-        procesar_directorios(dir_1, dir_2, cartoon)
+    main()

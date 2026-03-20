@@ -2,6 +2,7 @@
 # -*- coding: utf8 -*-
 
 
+import html
 import math
 import re
 import sys
@@ -10,10 +11,70 @@ import numpy as np
 
 # Regex corregidos
 RE_TAGS = re.compile(r"\{[^{}]*\}")
-RE_UNKNOWN = re.compile(
-    r"[\u3040-\u309F\u30A0-\u30FF\u4300-\u9faf\u3000-\u30ff\uff00-\uffff]"
-)
 RE_ITALIC = re.compile(r"\\i1(?!\d)")
+
+
+def textClean(text):
+
+    if not text:
+        return ""
+
+    r = text
+    r = RE_TAGS.sub("", r).strip()
+    r = html.unescape(r)
+
+    mojibake_dict = {
+        "\u00c3\u2030": "É",
+        "\u00c3\u0089": "É",
+        "\u00c3\u0081": "Á",
+        "\u00c3\u2020": "Á",
+        "\u00c3\u008d": "Í",
+        "\u00c3\u00ad": "í",
+        "\u00c3\u0093": "Ó",
+        "\u00c3\u201c": "Ó",
+        "\u00c3\u009a": "Ú",
+        "\u00c3\u009a": "Ú",
+        "\u00c3\u00a1": "á",
+        "\u00c3\u00a9": "é",
+        "\u00c3\u00ad": "í",
+        "\u00c3\u00b3": "ó",
+        "\u00c3\u00ba": "ú",
+        "\u00c3\u00b1": "ñ",
+        "\u00c3\u0091": "Ñ",
+        "\u00c2\u00bf": "¿",
+        "\u00c2\u00a1": "¡",
+        "Ã‰": "É",
+        "Ã¡": "á",
+        "Ã©": "é",
+        "Ã­": "í",
+        "Ã³": "ó",
+        "Ãº": "ú",
+        "Ã±": "ñ",
+    }
+    for bad, good in mojibake_dict.items():
+        r = r.replace(bad, good)  # 5. REPLACEMENTS ORIGINALES
+    # Normalizamos comillas tipográficas (abiertas/cerradas) a comillas estándar
+    # Usamos los códigos Unicode para asegurar que detecte las comillas "curvas"
+    # \u201c y \u201d son las comillas dobles curvas (abrir y cerrar)
+    # \u2018 y \u2019 son las comillas simples curvas
+    r = r.replace("\ufeff", "")
+    r = r.replace("\u201c", '"').replace("\u201d", '"')
+    r = r.replace("\u2018", "'").replace("\u2019", "'")
+    # También existen estas comillas bajas que se usan a veces:
+    r = r.replace("\u201e", '"')
+
+    # Continuar con el resto...
+    r = re.compile(
+        r"[\u3040-\u309F\u30A0-\u30FF\u4300-\u9faf\u3000-\u30ff\uff00-\uffff]"
+    ).sub("", r)
+    r = r.replace("\\n", " ").replace("\\N", " ")
+    # Eliminar el espacio entre el número y el símbolo de porcentaje (ej: "10 %" -> "10%")
+    r = re.sub(r"(\d+(?:[.,]\d+)?)\s*%", r"\1%", r)
+
+    # 7. ESPACIOS EXTRAS (opcional pero recomendado)
+    r = re.sub(r"\s+", " ", r).strip()
+
+    return r
 
 
 def balancear_texto(texto, limite_max=40):
@@ -117,23 +178,8 @@ def process_text_logic(raw_text, style, style_italic):
     if RE_ITALIC.search(raw_text) or style.lower() in style_italic:
         clean_text = f"<i>{clean_text}</i>"
 
-    # 5. REPLACEMENTS ORIGINALES
-    # Normalizamos comillas tipográficas (abiertas/cerradas) a comillas estándar
-    # Usamos los códigos Unicode para asegurar que detecte las comillas "curvas"
-    # \u201c y \u201d son las comillas dobles curvas (abrir y cerrar)
-    # \u2018 y \u2019 son las comillas simples curvas
-    text = clean_text.replace("\u201c", '"').replace("\u201d", '"')
-    text = text.replace("\u2018", "'").replace("\u2019", "'")
-    # También existen estas comillas bajas que se usan a veces:
-    text = text.replace("\u201e", '"')
-
-    # Continuar con el resto...
-    text = text.replace("&amp;", "&")
-    text = RE_UNKNOWN.sub("", text)
-    text = text.replace("\\n", " ").replace("\\N", " ")
-    text = text.replace("\ufeff", "")
-    # Eliminar el espacio entre el número y el símbolo de porcentaje (ej: "10 %" -> "10%")
-    text = re.sub(r"(\d+(?:[.,]\d+)?)\s*%", r"\1%", text)
+    # 5. REPLACEMENTS
+    text = textClean(clean_text)
 
     # --- LIMPIEZA DE ESPACIOS PREVIA AL BALANCEO ---
     text = " ".join(text.split())
@@ -158,8 +204,12 @@ def convert_ass_to_srt(input_file, output_file):
     style_italic = set()
     dialogue_data = []
 
-    with open(input_file, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
+    try:
+        with open(input_file, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception:
+        with open(input_file, "r", encoding="latin-1") as f:
+            lines = f.readlines()
 
     italic_idx = -1
     for line in lines:
@@ -221,6 +271,8 @@ def convert_ass_to_srt(input_file, output_file):
     for i in range(len(subs) - 1):
         if subs[i]["end"] > subs[i + 1]["start"]:
             subs[i]["end"] = subs[i + 1]["start"]
+        if subs[i]["end"] - subs[i]["start"] < 100:
+            subs[i]["end"] = subs[i]["start"] + 100
 
     # DURACIÓN MÍNIMA (Criterio 2: 1cs)
     subs = subs[(subs["end"] - subs["start"]) >= 1]
@@ -237,14 +289,19 @@ def convert_srt_to_srt(input_file, output_file):
     style_italic = set()
     dialogue_data = []
 
-    with open(input_file, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
+    try:
+        with open(input_file, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception:
+        with open(input_file, "r", encoding="latin-1") as f:
+            lines = f.readlines()
 
     with open(output_file, "w", encoding="utf-8") as f:
         for line in lines:
-            clean_text = re.sub(r"{[^{]*}", r"", line)
+            # clean_text = re.sub(r"{[^{]*}", r"", line)
             # clean_text = line
-            f.write(f"{clean_text}")
+            clean_text = textClean(line)
+            f.write(f"{clean_text}\n")
 
 
 if __name__ == "__main__":

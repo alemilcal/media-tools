@@ -53,9 +53,9 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         target_dir = os.path.normpath(os.path.join(base_destino, rel_path))
 
         # 2. Creamos la carpeta en el destino si no existe
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-            print(f"Carpeta creada: {target_dir}")
+        # if not os.path.exists(target_dir):
+        #     os.makedirs(target_dir)
+        #     print(f"Carpeta creada: {target_dir}")
 
         # 3. Procesamos los archivos
         for nombre_archivo in sorted(files):
@@ -74,7 +74,7 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                 if cartoon:
                     subextension += ".crt"
                 ruta_salida = os.path.join(
-                    target_dir, nombre_base + subextension + ".mkv"
+                    target_dir, nombre_base + subextension + ".mp4"
                 )
 
                 # Definimos la ruta completa del log para no tener dudas

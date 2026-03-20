@@ -35,7 +35,7 @@ def calcular_espacio_total():
     print(f"(Siguiendo enlaces simbólicos a los discos de montaje)\n")
 
     total_bytes = 0
-    subcarpetas = ["movies", "spanish-movies", "shows", "spanish-shows"]
+    subcarpetas = ["anime", "cine", "ecchi", "tv"]
 
     for sub in subcarpetas:
         ruta_sub = TOPFLIX_BASE / sub

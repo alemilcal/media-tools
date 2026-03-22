@@ -104,8 +104,7 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                 except subprocess.CalledProcessError as e:
                     print(f"Error en {nombre_archivo}. Revisa el log: {ruta_log}")
                 except FileNotFoundError:
-                    print(f"Error: No se encontró el optimizador o Python3. Revisa la ruta: {VIDEO_OPTIMIZER_PY}    
-                          ")
+                    print(f"Error: No se encontró el optimizador o Python3. Revisa la ruta: {VIDEO_OPTIMIZER_PY}")
 
 
 if __name__ == "__main__":

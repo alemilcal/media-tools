@@ -12,7 +12,7 @@ if os.name == 'posix':
     MKVMERGE_BIN = 'mkvmerge'
     MKVPROPEDIT_BIN = 'mkvpropedit'
 else:
-    BIN_PATH = 'C:/script/bin/'
+    BIN_PATH = 'C:/bin/'
     MKVMERGE_BIN = os.path.join(BIN_PATH, 'mkvmerge.exe')
     MKVPROPEDIT_BIN = os.path.join(BIN_PATH, 'mkvpropedit.exe')
 

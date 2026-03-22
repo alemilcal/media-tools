@@ -126,14 +126,20 @@ import unicodedata
 def limpiar_texto(texto):
     """Normaliza solo el texto de un nombre de archivo o carpeta."""
     if not texto: return ""
-    # 1. Quitar paréntesis, corchetes y llaves
-    n = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', texto)
-    # 2. Quitar acentos y eñes
-    n = unicodedata.normalize('NFD', n).encode('ascii', 'ignore').decode('ascii').lower()
-    # 3. Colapsar espacios/guiones en un solo _ y limpiar bordes
-    n = re.sub(r'[\s\-_]+', '_', n).strip('_')
-    # 4. Solo permitir a-z, 0-9 y _
-    n = re.sub(r'[^a-z0-9_]', '', n)
+    # 1. Quitar corchetes y llaves (mantener paréntesis y su contenido)
+    n = re.sub(r'\[[^\]]*\]|\{[^}]*\}', '', texto)
+    # 2. Quitar acentos y eñes (mantener mayúsculas)
+    n = unicodedata.normalize('NFD', n).encode('ascii', 'ignore').decode('ascii')
+    # 3. Colapsar solo guiones/underscores en un _ (mantener espacios)
+    n = re.sub(r'[\-_]+', '_', n).strip('_')
+    # 4. Permitir a-z, A-Z, 0-9, espacios, guiones bajos y paréntesis
+    n = re.sub(r'[^a-zA-Z0-9_ \(\)]', '', n)
+    # 5. Eliminar espacios junto a puntos
+    n = re.sub(r'\s*\.\s*', '.', n)
+    # 6. Colapsar múltiples espacios seguidos en uno solo
+    n = re.sub(r' +', ' ', n)
+    # 7. Eliminar espacios al principio y final
+    n = n.strip()
     return n
 
 def procesar_directorios(origen_raw, destino_raw, cartoon):

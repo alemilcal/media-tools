@@ -1,30 +1,43 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Configuración inicial
+set "INPUT_DIR="
+set "OUTPUT_DIR=E:\transcode\input-film\shows"
+set "FILEBOT_EXE=C:\bin\filebot\filebot.exe"
+set "ACTION=copy"
+
+:: Procesar todos los argumentos
+for %%A in (%*) do (
+    if "%%A"=="-c" (
+        set "OUTPUT_DIR=E:\transcode\input-cartoon\shows"
+    ) else if "%%A"=="-n" (
+        set "ACTION=test"
+    ) else (
+        set "INPUT_DIR=%%A"
+    )
+)
+
 :: Comprobar si se ha pasado una carpeta como argumento
-if "%~1"=="" (
-    echo [ERROR] Por favor, arrastra una carpeta sobre este archivo .bat o especifica la ruta.
+if "!INPUT_DIR!"=="" (
+    echo [ERROR] Por favor, especifica la carpeta de entrada.
+    echo Uso: %~n0 [-c para cartoon] [-n para test] ^<carpeta^>
     pause
     exit /b
 )
 
-:: Configuración de rutas y parámetros
-set "INPUT_DIR=%~1"
-set "OUTPUT_DIR=E:\transcode\input-film\shows"
-set "FILEBOT_EXE=C:\bin\filebot\filebot.exe"
-
-echo Procesando: "%INPUT_DIR%"
-echo Destino:    "%OUTPUT_DIR%"
+echo Procesando: "!INPUT_DIR!"
+echo Destino:    "!OUTPUT_DIR!"
+echo Accion:     !ACTION!
 echo -------------------------------------------------------
 
 :: Ejecución de FileBot
-"%FILEBOT_EXE%" -rename "%INPUT_DIR%" ^
- --output "%OUTPUT_DIR%" ^
+"!FILEBOT_EXE!" -rename "!INPUT_DIR!" ^
+ --output "!OUTPUT_DIR!" ^
  --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^
  --db TheMovieDB::TV ^
  -non-strict ^
- --action test
+ --action !ACTION!
 
 echo -------------------------------------------------------
 echo Proceso finalizado.
-pause

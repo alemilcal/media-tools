@@ -5,6 +5,7 @@ import argparse
 import fnmatch
 import os
 import re
+import shutil
 import string
 import subprocess
 
@@ -43,7 +44,6 @@ parser.add_argument("-r", action="store_true", help="recursive rename")
 parser.add_argument("-s", action="store_true", help="remove spaces")
 parser.add_argument("-t", action="store_true", help="generate tv show info files")
 parser.add_argument("-x", nargs=2, help="replace string (regex)")
-parser.add_argument("-y", action="store_true", help="overwrite files without prompt")
 parser.add_argument("-z", action="store_true", help="dry run")
 parser.add_argument("path", nargs="+", help="initial path")
 args = parser.parse_args()
@@ -273,15 +273,8 @@ def process_path(p, numfile):
             fck = pb[:-4] + "%d" % (idx) + e
             idx = idx + 1
         pb = fck
-        if args.y:
-            c = 'mv "%s" "%s"' % (p, pb)
-        else:
-            c = 'mv -i "%s" "%s"' % (p, pb)
-        if args.o:
-            print(os.path.basename(pb))
-        else:
-            # qqlib.execute_command(c,args.z)
-            execute_command(c)
+        shutil.move(p, pb)
+        execute_command(c)
     if args.j:  # jpeg EXIF mode
         c = 'jhead -exonly -nf%%Y-%%m-%%d\ %%H.%%M.%%S "%s";jhead -ft "%s"' % (pb, pb)
         # qqlib.execute_command(c,args.z)

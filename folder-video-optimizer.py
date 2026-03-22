@@ -61,7 +61,7 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         for nombre_archivo in sorted(files):
             if nombre_archivo.lower().endswith(
                 ".mkv"
-            ) or nombre_archivo.lower().endswith(".mp4"):
+            ) or nombre_archivo.lower().endswith(".mp4"):                
                 nombre_sin_ext = os.path.splitext(nombre_archivo)[0]
                 if os.path.exists(
                     os.path.join(root, nombre_sin_ext + ".ok")

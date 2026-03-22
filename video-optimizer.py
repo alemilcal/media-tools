@@ -119,8 +119,8 @@ def convertVideo():
             f" -crf {videoQuality} -tune {tune} -vf scale='{videoWidth}:-2',format=yuv420p -map 0:v:0"
             f" -c:a {AUDIO_CODEC} -ac {audioChannels} -b:a {audioBitrate}k {audioSampling}"
         )
-        print(AudioTrackSelected)
-        print(AudioTracks)
+        #print(AudioTrackSelected)
+        #print(AudioTracks)
         for k in range(len(AudioTrackSelected)):
             c = languageCode3Char(AudioTracks[AudioTrackSelected[k]]["language"])
             o += f" -map 0:a:{AudioTracks[k]['id']} -metadata:s:a:{k} language={c}"

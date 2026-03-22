@@ -117,6 +117,25 @@ def normalizar_ruta(ruta):
     ruta_final = drive + os.sep + os.path.join(*partes_limpias)
     return os.path.normpath(ruta_final)
 
+import os
+import sys
+import subprocess
+import re
+import unicodedata
+
+def limpiar_texto(texto):
+    """Normaliza solo el texto de un nombre de archivo o carpeta."""
+    if not texto: return ""
+    # 1. Quitar paréntesis, corchetes y llaves
+    n = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', texto)
+    # 2. Quitar acentos y eñes
+    n = unicodedata.normalize('NFD', n).encode('ascii', 'ignore').decode('ascii').lower()
+    # 3. Colapsar espacios/guiones en un solo _ y limpiar bordes
+    n = re.sub(r'[\s\-_]+', '_', n).strip('_')
+    # 4. Solo permitir a-z, 0-9 y _
+    n = re.sub(r'[^a-z0-9_]', '', n)
+    return n
+
 def procesar_directorios(origen_raw, destino_raw, cartoon):
     origen = os.path.abspath(origen_raw)
     destino = os.path.abspath(destino_raw)
@@ -125,37 +144,38 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
         print(f"Error: El origen '{origen}' no existe.")
         return
 
-    # Decidir base_destino
+    # Determinamos la base del destino
     if origen_raw.endswith(os.sep) or (os.altsep and origen_raw.endswith(os.altsep)):
         base_destino = destino
     else:
-        base_destino = os.path.join(destino, os.path.basename(origen))
+        base_destino = os.path.join(destino, limpiar_texto(os.path.basename(origen)))
 
     for root, dirs, files in os.walk(origen):
         dirs.sort()
         
-        # 1. Calculamos la ruta de destino y LA NORMALIZAMOS de golpe
+        # 1. Calculamos la carpeta destino normalizando cada nivel
         rel_path = os.path.relpath(root, origen)
-        target_dir = normalizar_ruta(os.path.join(base_destino, rel_path))
+        segmentos_rel = [limpiar_texto(s) for s in rel_path.split(os.sep) if s != "."]
+        target_dir = os.path.join(base_destino, *segmentos_rel)
 
         for nombre_archivo in sorted(files):
             if nombre_archivo.lower().endswith((".mkv", ".mp4")):
-                nombre_sin_ext = os.path.splitext(nombre_archivo)[0]
+                nombre_sin_ext, ext_original = os.path.splitext(nombre_archivo)
                 
-                # Verificamos marcas de estado (.ok / .err)
-                if any(os.path.exists(os.path.join(root, nombre_sin_ext + ext)) for ext in [".ok", ".err"]):
+                # Filtro de archivos ya procesados
+                if any(os.path.exists(os.path.join(root, nombre_sin_ext + e)) for e in [".ok", ".err"]):
                     continue
-                
-                # 2. Preparamos las rutas de salida (ya normalizadas vía target_dir)
+
+                # 2. Preparamos nombres de salida
                 subext = ".q20" + (".crt" if cartoon else "")
-                nombre_base_norm = normalizar_ruta(nombre_sin_ext) # Solo el nombre
+                nombre_limpio = limpiar_texto(nombre_sin_ext)
                 
                 ruta_entrada = os.path.join(root, nombre_archivo)
-                ruta_salida = os.path.join(target_dir, f"{nombre_base_norm}{subext}.mp4")
-                ruta_log = os.path.join(target_dir, f"{nombre_base_norm}{subext}.log")
+                # IMPORTANTE: Aquí unimos sin que limpiar_texto añada barras extra
+                ruta_salida = os.path.join(target_dir, f"{nombre_limpio}{subext}.mp4")
+                ruta_log = os.path.join(target_dir, f"{nombre_limpio}{subext}.log")
 
-                # --- EL MOMENTO DE LA VERDAD ---
-                # Solo creamos la carpeta si el archivo realmente va a procesarse
+                # 3. Crear carpeta solo si hay trabajo que hacer
                 if not os.path.exists(target_dir):
                     os.makedirs(target_dir, exist_ok=True)
                     print(f"Carpeta creada: {target_dir}")
@@ -167,15 +187,15 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                         lista_comando = [sys.executable, VIDEO_OPTIMIZER_PY]
                         if cartoon: lista_comando.append("-c")
                         lista_comando.extend([ruta_entrada, ruta_salida])
-                        
+
                         subprocess.run(
                             lista_comando,
                             check=True,
                             stdout=f_log,
                             stderr=subprocess.STDOUT,
-                            cwd=target_dir, # Ahora coincide al 100% con la carpeta creada
+                            cwd=target_dir
                         )
-                except (subprocess.CalledProcessError, Exception) as e:
+                except Exception as e:
                     print(f"Error procesando {nombre_archivo}: {e}")
 
 # def procesar_directorios(origen_raw, destino_raw, cartoon):

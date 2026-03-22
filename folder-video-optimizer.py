@@ -32,44 +32,47 @@ import unicodedata
 import os
 
 def normalizar_ruta(ruta):
-    # 1. Separar la unidad (en Windows) del resto de la ruta
-    # Esto protege el "C:" o "E:" para que no se normalice
     drive, resto = os.path.splitdrive(ruta)
-    
-    # 2. Dividir la ruta en sus partes (carpetas y archivo)
-    # Usamos re.split para pillar tanto / como \
     partes = re.split(r'[\\/]', resto)
     partes_limpias = []
 
-    for part in partes:
-        if not part: # Saltamos entradas vacías por barras dobles
+    for i, part in enumerate(partes):
+        if not part:
             partes_limpias.append("")
             continue
 
-        # A. Eliminar paréntesis, corchetes y llaves con su contenido
-        p = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', part)
+        # 1. Separar nombre de la extensión (manejando múltiples extensiones)
+        # Buscamos el primer punto que no sea un punto al inicio (archivo oculto)
+        if "." in part and not part.startswith("."):
+            nombre_base = part[:part.find(".")]
+            extensiones = part[part.find("."):] # Incluye todos los .q20.crt.mp4
+        else:
+            nombre_base = part
+            extensiones = ""
 
-        # B. Quitar acentos y eñes
-        p = unicodedata.normalize('NFD', p)
-        p = p.encode('ascii', 'ignore').decode('ascii')
-
-        # C. Minúsculas y cambios básicos
-        p = p.lower().replace(' ', '_')
-
-        # D. Solo permitir a-z, 0-9, _, -, .
-        p = re.sub(r'[^a-z0-9._-]', '', p)
-
-        # E. LIMPIEZA CRÍTICA: Quitar guiones/puntos sobrantes
-        p = p.strip('_- ')      # Quita _ o - al inicio y al final
-        p = re.sub(r'_+', '_', p) # Colapsa múltiples ___ en uno
-        p = re.sub(r'-+', '-', p) # Colapsa múltiples --- en uno
+        # 2. Limpieza del nombre base
+        # A. Quitar paréntesis, corchetes y llaves
+        n = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', nombre_base)
         
-        partes_limpias.append(p)
+        # B. Normalizar tildes y eñes
+        n = unicodedata.normalize('NFD', n)
+        n = n.encode('ascii', 'ignore').decode('ascii').lower()
 
-    # 3. Reconstruir la ruta usando el separador del sistema actual
+        # C. EL CAMBIO CLAVE: Colapsar CUALQUIER secuencia de símbolos 
+        # (espacios, guiones, guiones bajos) en un único guion bajo
+        n = re.sub(r'[\s\-_]+', '_', n)
+
+        # D. Solo permitir letras y números (por si quedaron caracteres raros)
+        n = re.sub(r'[^a-z0-9_]', '', n)
+
+        # E. Quitar guiones bajos de los extremos (evita el "_" antes del punto)
+        n = n.strip('_')
+
+        # 3. Reensamblar la parte
+        partes_limpias.append(n + extensiones)
+
+    # Reconstruir ruta
     ruta_final = drive + os.sep + os.path.join(*partes_limpias)
-    
-    # 4. Toque final: normpath arregla barras duplicadas o puntos raros
     return os.path.normpath(ruta_final)
 
 def procesar_directorios(origen_raw, destino_raw, cartoon):

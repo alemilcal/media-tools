@@ -1,123 +1,105 @@
 #!/usr/bin/python3
 # -*- coding: utf8 -*-
 
-import os, argparse, subprocess, sys, json, glob
+import os, argparse, subprocess, json, glob, sys
 
-VERSION = 'v2.1.0-turbo'
-VXT = ('.mkv', '.mp4', '.m4v', '.mov', '.mpg', '.mpeg', '.avi', '.vob', '.mts', '.m2ts', '.wmv', '.flv')
+VERSION = 'v3.0.0-mkvmerge'
+VXT = ('.mkv', '.mp4', '.m4v', '.mov', '.avi', '.wmv')
 
-# Configuración de binarios
+# Configuración de binarios (MKVToolNix)
 if os.name == 'posix':
-    MEDIAINFO_BIN = 'mediainfo'
+    MKVMERGE_BIN = 'mkvmerge'
     MKVPROPEDIT_BIN = 'mkvpropedit'
 else:
     BIN_PATH = 'C:/script/bin/'
-    MEDIAINFO_BIN = f'{BIN_PATH}MediaInfo.exe'
+    MKVMERGE_BIN = f'{BIN_PATH}mkvmerge.exe'
     MKVPROPEDIT_BIN = f'{BIN_PATH}mkvpropedit.exe'
 
 parser = argparse.ArgumentParser(description=f'Video analyzer ({VERSION})')
-parser.add_argument('input', nargs='*', help='Input file(s) or wildcards like *.mkv')
-parser.add_argument('-v', '--verbose', action='store_true', help='Verbose mode')
+parser.add_argument('input', nargs='*', help='Archivos o comodines (ej: *.mkv)')
 args = parser.parse_args()
 
-def get_all_media_data(file_list):
-    """Ejecuta MediaInfo UNA SOLA VEZ para todos los archivos (Máxima velocidad)"""
-    if not file_list: return []
+def get_track_info(filepath):
+    """Usa mkvmerge -J para obtener metadatos instantáneamente"""
     try:
-        # Pasamos la lista completa de archivos a mediainfo de una tacada
-        cmd = [MEDIAINFO_BIN, '--Output=JSON'] + file_list
-        result = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        data = json.loads(result)
+        cmd = [MKVMERGE_BIN, '-J', filepath]
+        result = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        return json.loads(result)
+    except:
+        return None
+
+def fix_lang(lang):
+    """Normaliza idiomas a 3 letras capitalizadas"""
+    m = {'und': 'und', 'spa': 'Spa', 'jpn': 'Jpn', 'eng': 'Eng', 'fre': 'Fre', 'ger': 'Ger'}
+    l = lang.lower()[:3]
+    return m.get(l, l.capitalize())
+
+def analyze_file(filepath):
+    data = get_track_info(filepath)
+    if not data or 'tracks' not in data: return
+
+    filename = os.path.basename(filepath)
+    display_name = (filename[:65] + '...') if len(filename) > 68 else filename.ljust(68)
+
+    audios = []
+    subs = []
+
+    for t in data['tracks']:
+        t_type = t.get('type')
+        props = t.get('properties', {})
+        lang = fix_lang(props.get('language', 'und'))
         
-        # MediaInfo devuelve un objeto si es uno, o una lista si son varios
-        media_info = data.get('media', [])
-        return media_info if isinstance(media_info, list) else [media_info]
-    except Exception as e:
-        if args.verbose: print(f"Error en análisis masivo: {e}")
-        return []
+        if t_type == 'audio':
+            audios.append(lang)
+        elif t_type == 'subtitles':
+            # Detectar forzado por flag o por nombre del track
+            forced = props.get('forced_track') == True or any(x in props.get('track_name', '').lower() for x in ['forz', 'forc'])
+            title = props.get('track_name', '')[:6]
+            subs.append({'lang': lang, 'forced': forced, 'title': title})
 
-def format_lang(track):
-    """Extrae el código de 3 letras (ISO 639-2) y lo capitaliza"""
-    # Intentamos obtener el código de 3 letras directamente de MediaInfo
-    lang = track.get('Language_ISO639_2') or track.get('Language') or 'und'
-    # Forzamos mapeos comunes si vienen en 2 letras
-    mapping = {'ja': 'Jpn', 'en': 'Eng', 'es': 'Spa'}
-    lang = lang[:3].lower()
-    return mapping.get(lang[:2], lang.capitalize())
+    # Lógica de advertencias (WL)
+    has_spa_audio = any(a == 'Spa' for a in audios[:3])
+    has_spa_sub_forced = any(s['lang'] == 'Spa' and s['forced'] for s in subs[:3])
 
-def analyze_batch(media_objects):
-    header = "{:68}   {:3} {:3} {:3}   {:12}   {:12}   {:12}   {}".format("File", "Au1", "Au2", "Au3", "Sub1", "Sub2", "Sub3", "WL")
-    print(header)
-    print("-" * 132)
+    w_val = 0
+    if not has_spa_audio: w_val += 2
+    if not has_spa_sub_forced: w_val += 1
+    w_str = f"W{w_val}" if w_val > 0 else "  "
 
-    for media in media_objects:
-        tracks = media.get('track', [])
-        general = tracks[0] if tracks else {}
-        filepath = general.get('CompleteName', 'Unknown')
-        filename = os.path.basename(filepath)
-        
-        display_name = (filename[:65] + '...') if len(filename) > 68 else filename.ljust(68)
+    # Preparar columnas
+    a_cols = (audios + ['   ']*3)[:3]
+    s_formatted = []
+    for i in range(3):
+        if i < len(subs):
+            s = subs[i]
+            s_formatted.append(f"{s['lang']:<3} {'F' if s['forced'] else ' '} {s['title']:<6}")
+        else:
+            s_formatted.append("            ")
 
-        audio_langs = []
-        sub_info = []
-
-        for t in tracks:
-            t_type = t.get('@type')
-            if t_type == 'Audio':
-                audio_langs.append(format_lang(t))
-            elif t_type == 'Text':
-                lang = format_lang(t)
-                is_forced = t.get('Forced') == 'Yes' or any(x in t.get('Title', '').lower() for x in ['forz', 'forc'])
-                title = t.get('Title', '')[:6]
-                sub_info.append((lang, is_forced, title))
-
-        # Lógica de avisos (WL)
-        audio_spa = any(a == 'Spa' for a in audio_langs[:3])
-        sub_spa_forced = any(s[0] == 'Spa' and s[1] for s in sub_info[:3])
-
-        w_val = 0
-        if not audio_spa: w_val += 2
-        if not sub_spa_forced: w_val += 1
-        w_string = f"W{w_val}" if w_val > 0 else "  "
-
-        audios = (audio_langs + ['   ']*3)[:3]
-        subs = []
-        for i in range(3):
-            if i < len(sub_info):
-                s = sub_info[i]
-                subs.append(f"{s[0]:<3} {'F' if s[1] else ' '} {s[2]:<6}")
-            else:
-                subs.append("            ")
-
-        print(f"{display_name} | {' '.join(audios)} | {' | '.join(subs)} | {w_string}")
+    print(f"{display_name} | {' '.join(a_cols)} | {' | '.join(s_formatted)} | {w_str}")
 
 def main():
+    # Encabezado
+    print("{:68}   {:3} {:3} {:3}   {:12}   {:12}   {:12}   {}".format("File", "Au1", "Au2", "Au3", "Sub1", "Sub2", "Sub3", "WL"))
+    print("-" * 132)
+
+    # Resolución de archivos (Soporte para Windows *.mkv)
+    targets = args.input if args.input else ['.']
     files_to_process = []
     
-    # 1. Recolección de archivos (ahora con glob para Windows)
-    targets = args.input if args.input else ['.']
-    for item in targets:
-        if os.path.isdir(item):
-            for root, _, files in os.walk(item):
+    for t in targets:
+        # glob.glob expande los comodines que Windows no sabe manejar por sí solo
+        path_list = glob.glob(t) if '*' in t else ([t] if os.path.isfile(t) else [])
+        if not path_list and os.path.isdir(t):
+            for root, _, files in os.walk(t):
                 for f in files:
                     if f.lower().endswith(VXT):
-                        files_to_process.append(os.path.abspath(os.path.join(root, f)))
+                        files_to_process.append(os.path.join(root, f))
         else:
-            for f in glob.glob(item):
-                if f.lower().endswith(VXT):
-                    files_to_process.append(os.path.abspath(f))
+            files_to_process.extend([f for f in path_list if f.lower().endswith(VXT)])
 
-    if not files_to_process:
-        print("No se encontraron archivos de video.")
-        return
-
-    # 2. Análisis en un solo bloque (Batch processing)
-    # Dividimos en grupos de 50 para no exceder el límite de caracteres de la terminal
-    batch_size = 50
-    for i in range(0, len(files_to_process), batch_size):
-        chunk = files_to_process[i:i + batch_size]
-        media_data = get_all_media_data(chunk)
-        analyze_batch(media_data)
+    for f in sorted(files_to_process):
+        analyze_file(f)
 
 if __name__ == '__main__':
     main()

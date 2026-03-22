@@ -82,6 +82,10 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
 
                 print(f"Optimizando: {ruta_entrada} -> {ruta_salida}")
 
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+                    print(f"Carpeta creada: {target_dir}")
+
                 try:
                     with open(ruta_log, "w", encoding="utf-8") as f_log:
                         lista_comando = [

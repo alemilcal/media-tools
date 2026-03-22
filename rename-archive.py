@@ -274,7 +274,7 @@ def process_path(p, numfile):
             idx = idx + 1
         pb = fck
         shutil.move(p, pb)
-        execute_command(c)
+        print("Renamed: ", p, " -> ", pb)
     if args.j:  # jpeg EXIF mode
         c = r'jhead -exonly -nf%%Y-%%m-%%d\ %%H.%%M.%%S "%s";jhead -ft "%s"' % (pb, pb)
         # qqlib.execute_command(c,args.z)

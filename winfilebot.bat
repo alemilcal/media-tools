@@ -31,6 +31,25 @@ echo Destino:    "!OUTPUT_DIR!"
 echo Accion:     !ACTION!
 echo -------------------------------------------------------
 
+:: Si no se especificó -n, primero ejecutar en modo test
+if "!ACTION!"=="copy" (
+    echo.
+    echo [PREVIEW] Ejecutando en modo test para ver los cambios...
+    echo.
+    "!FILEBOT_EXE!" -rename "!INPUT_DIR!" ^
+     --output "!OUTPUT_DIR!" ^
+     --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^
+     --db TheMovieDB::TV ^
+     -non-strict ^
+     --action test
+    
+    echo.
+    echo -------------------------------------------------------
+    echo Presiona cualquier tecla para ejecutar en modo COPY...
+    echo -------------------------------------------------------
+    pause
+)
+
 :: Ejecución de FileBot
 "!FILEBOT_EXE!" -rename "!INPUT_DIR!" ^
  --output "!OUTPUT_DIR!" ^

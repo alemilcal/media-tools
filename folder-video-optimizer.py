@@ -27,6 +27,50 @@ def main():
     else:
         procesar_directorios(args.input[0], args.output[0], args.c)
 
+import re
+import unicodedata
+import os
+
+def normalizar_ruta(ruta):
+    # 1. Separar la unidad (en Windows) del resto de la ruta
+    # Esto protege el "C:" o "E:" para que no se normalice
+    drive, resto = os.path.splitdrive(ruta)
+    
+    # 2. Dividir la ruta en sus partes (carpetas y archivo)
+    # Usamos re.split para pillar tanto / como \
+    partes = re.split(r'[\\/]', resto)
+    partes_limpias = []
+
+    for part in partes:
+        if not part: # Saltamos entradas vacías por barras dobles
+            partes_limpias.append("")
+            continue
+
+        # A. Eliminar paréntesis, corchetes y llaves con su contenido
+        p = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', part)
+
+        # B. Quitar acentos y eñes
+        p = unicodedata.normalize('NFD', p)
+        p = p.encode('ascii', 'ignore').decode('ascii')
+
+        # C. Minúsculas y cambios básicos
+        p = p.lower().replace(' ', '_')
+
+        # D. Solo permitir a-z, 0-9, _, -, .
+        p = re.sub(r'[^a-z0-9._-]', '', p)
+
+        # E. LIMPIEZA CRÍTICA: Quitar guiones/puntos sobrantes
+        p = p.strip('_- ')      # Quita _ o - al inicio y al final
+        p = re.sub(r'_+', '_', p) # Colapsa múltiples ___ en uno
+        p = re.sub(r'-+', '-', p) # Colapsa múltiples --- en uno
+        
+        partes_limpias.append(p)
+
+    # 3. Reconstruir la ruta usando el separador del sistema actual
+    ruta_final = drive + os.sep + os.path.join(*partes_limpias)
+    
+    # 4. Toque final: normpath arregla barras duplicadas o puntos raros
+    return os.path.normpath(ruta_final)
 
 def procesar_directorios(origen_raw, destino_raw, cartoon):
 
@@ -63,9 +107,14 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                 ".mkv"
             ) or nombre_archivo.lower().endswith(".mp4"):                
                 nombre_sin_ext = os.path.splitext(nombre_archivo)[0]
+                nombre_sin_ext_normalizado = normalizar_ruta(nombre_sin_ext)
                 if os.path.exists(
                     os.path.join(root, nombre_sin_ext + ".ok")
                 ) or os.path.exists(os.path.join(root, nombre_sin_ext + ".err")):
+                    continue
+                if os.path.exists(
+                    os.path.join(root, nombre_sin_ext_normalizado + ".ok")
+                ) or os.path.exists(os.path.join(root, nombre_sin_ext_normalizado + ".err")):
                     continue
                 ruta_entrada = os.path.join(root, nombre_archivo)
 
@@ -73,12 +122,12 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                 subextension = ".q20"
                 if cartoon:
                     subextension += ".crt"
-                ruta_salida = os.path.join(
+                ruta_salida = normalizar_ruta(os.path.join(
                     target_dir, nombre_base + subextension + ".mp4"
-                )
+                ))
 
                 # Definimos la ruta completa del log para no tener dudas
-                ruta_log = os.path.join(target_dir, nombre_base + subextension + ".log")
+                ruta_log = normalizar_ruta(os.path.join(target_dir, nombre_base + subextension + ".log"))
 
                 print(f"Optimizando: {ruta_entrada} -> {ruta_salida}")
 

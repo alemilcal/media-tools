@@ -180,8 +180,8 @@ def procesar_directorios(origen_raw, destino_raw, cartoon):
                     os.makedirs(target_dir, exist_ok=True)
                     print(f"Carpeta creada: {target_dir}")
 
-                print(f"Optimizando: {nombre_archivo} -> {os.path.basename(ruta_salida)}")
-
+                # Elimina el os.path.basename para ver la ruta completa
+                print(f"Optimizando: {ruta_entrada} -> {ruta_salida}")
                 try:
                     with open(ruta_log, "w", encoding="utf-8") as f_log:
                         lista_comando = [sys.executable, VIDEO_OPTIMIZER_PY]

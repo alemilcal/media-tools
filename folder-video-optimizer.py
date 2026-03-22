@@ -75,92 +75,190 @@ def normalizar_ruta(ruta):
     ruta_final = drive + os.sep + os.path.join(*partes_limpias)
     return os.path.normpath(ruta_final)
 
-def procesar_directorios(origen_raw, destino_raw, cartoon):
+import os
+import sys
+import subprocess
+import re
+import unicodedata
 
+def normalizar_ruta(ruta):
+    """
+    Normaliza una ruta completa: maneja unidad, carpetas y nombre de archivo.
+    """
+    drive, resto = os.path.splitdrive(ruta)
+    partes = re.split(r'[\\/]', resto)
+    partes_limpias = []
+
+    for i, part in enumerate(partes):
+        if not part:
+            if i == 0: partes_limpias.append("") # Manejo de rutas absolutas en Linux
+            continue
+
+        # Separamos el nombre de la extensión en el primer punto
+        if "." in part and not part.startswith("."):
+            nombre_base = part[:part.find(".")]
+            extensiones = part[part.find("."):]
+        else:
+            nombre_base = part
+            extensiones = ""
+
+        # Limpieza: paréntesis/corchetes, acentos, minúsculas
+        n = re.sub(r'\([^)]*\)|\[[^\]]*\]|\{[^}]*\}', '', nombre_base)
+        n = unicodedata.normalize('NFD', n).encode('ascii', 'ignore').decode('ascii').lower()
+        
+        # Colapsar cualquier combinación de espacios/guiones/underscores en uno solo
+        n = re.sub(r'[\s\-_]+', '_', n)
+        
+        # Quitar underscores de los extremos (evita el "_" antes del punto)
+        n = n.strip('_')
+        
+        partes_limpias.append(n + extensiones)
+
+    ruta_final = drive + os.sep + os.path.join(*partes_limpias)
+    return os.path.normpath(ruta_final)
+
+def procesar_directorios(origen_raw, destino_raw, cartoon):
     origen = os.path.abspath(origen_raw)
     destino = os.path.abspath(destino_raw)
 
-    # Verificamos si el directorio de origen existe
     if not os.path.exists(origen):
-        print(f"Error: El directorio de origen '{origen}' no existe.")
+        print(f"Error: El origen '{origen}' no existe.")
         return
 
-    # Comprobamos si la ruta de origen termina en barra para decidir el destino base
-    # Si no termina en barra, añadimos el nombre de la carpeta de origen al destino
+    # Decidir base_destino
     if origen_raw.endswith(os.sep) or (os.altsep and origen_raw.endswith(os.altsep)):
         base_destino = destino
     else:
         base_destino = os.path.join(destino, os.path.basename(origen))
 
-    # Recorremos el árbol de directorios de origen
     for root, dirs, files in os.walk(origen):
         dirs.sort()
-        # 1. Calculamos la ruta relativa respecto al origen para replicarla en el destino
+        
+        # 1. Calculamos la ruta de destino y LA NORMALIZAMOS de golpe
         rel_path = os.path.relpath(root, origen)
-        target_dir = os.path.normpath(os.path.join(base_destino, rel_path))
+        target_dir = normalizar_ruta(os.path.join(base_destino, rel_path))
 
-        # 2. Creamos la carpeta en el destino si no existe
-        # if not os.path.exists(target_dir):
-        #     os.makedirs(target_dir)
-        #     print(f"Carpeta creada: {target_dir}")
-
-        # 3. Procesamos los archivos
         for nombre_archivo in sorted(files):
-            if nombre_archivo.lower().endswith(
-                ".mkv"
-            ) or nombre_archivo.lower().endswith(".mp4"):                
+            if nombre_archivo.lower().endswith((".mkv", ".mp4")):
                 nombre_sin_ext = os.path.splitext(nombre_archivo)[0]
-                nombre_sin_ext_normalizado = normalizar_ruta(nombre_sin_ext)
-                if os.path.exists(
-                    os.path.join(root, nombre_sin_ext + ".ok")
-                ) or os.path.exists(os.path.join(root, nombre_sin_ext + ".err")):
+                
+                # Verificamos marcas de estado (.ok / .err)
+                if any(os.path.exists(os.path.join(root, nombre_sin_ext + ext)) for ext in [".ok", ".err"]):
                     continue
-                if os.path.exists(
-                    os.path.join(root, nombre_sin_ext_normalizado + ".ok")
-                ) or os.path.exists(os.path.join(root, nombre_sin_ext_normalizado + ".err")):
-                    continue
+                
+                # 2. Preparamos las rutas de salida (ya normalizadas vía target_dir)
+                subext = ".q20" + (".crt" if cartoon else "")
+                nombre_base_norm = normalizar_ruta(nombre_sin_ext) # Solo el nombre
+                
                 ruta_entrada = os.path.join(root, nombre_archivo)
+                ruta_salida = os.path.join(target_dir, f"{nombre_base_norm}{subext}.mp4")
+                ruta_log = os.path.join(target_dir, f"{nombre_base_norm}{subext}.log")
 
-                nombre_base = os.path.splitext(nombre_archivo)[0]
-                subextension = ".q20"
-                if cartoon:
-                    subextension += ".crt"
-                ruta_salida = normalizar_ruta(os.path.join(
-                    target_dir, nombre_base + subextension + ".mp4"
-                ))
-
-                # Definimos la ruta completa del log para no tener dudas
-                ruta_log = normalizar_ruta(os.path.join(target_dir, nombre_base + subextension + ".log"))
-
-                print(f"Optimizando: {ruta_entrada} -> {ruta_salida}")
-
+                # --- EL MOMENTO DE LA VERDAD ---
+                # Solo creamos la carpeta si el archivo realmente va a procesarse
                 if not os.path.exists(target_dir):
-                    os.makedirs(target_dir)
+                    os.makedirs(target_dir, exist_ok=True)
                     print(f"Carpeta creada: {target_dir}")
+
+                print(f"Optimizando: {nombre_archivo} -> {os.path.basename(ruta_salida)}")
 
                 try:
                     with open(ruta_log, "w", encoding="utf-8") as f_log:
-                        lista_comando = [
-                            sys.executable,
-                            VIDEO_OPTIMIZER_PY,
-                        ]
-                        if cartoon:
-                            lista_comando.append("-c")
-                        lista_comando.append(ruta_entrada)
-                        lista_comando.append(ruta_salida)
-                        comando_para_leer = subprocess.list2cmdline(lista_comando)
-                        print(f"\nDEBUG - Comando ejecutado:\n{comando_para_leer}\n")
+                        lista_comando = [sys.executable, VIDEO_OPTIMIZER_PY]
+                        if cartoon: lista_comando.append("-c")
+                        lista_comando.extend([ruta_entrada, ruta_salida])
+                        
                         subprocess.run(
                             lista_comando,
                             check=True,
                             stdout=f_log,
                             stderr=subprocess.STDOUT,
-                            cwd=target_dir,
+                            cwd=target_dir, # Ahora coincide al 100% con la carpeta creada
                         )
-                except subprocess.CalledProcessError as e:
-                    print(f"Error en {nombre_archivo}. Revisa el log: {ruta_log}")
-                except FileNotFoundError:
-                    print(f"Error: No se encontró el optimizador o Python3. Revisa la ruta: {VIDEO_OPTIMIZER_PY}")
+                except (subprocess.CalledProcessError, Exception) as e:
+                    print(f"Error procesando {nombre_archivo}: {e}")
+
+# def procesar_directorios(origen_raw, destino_raw, cartoon):
+
+#     origen = os.path.abspath(origen_raw)
+#     destino = os.path.abspath(destino_raw)
+
+#     # Verificamos si el directorio de origen existe
+#     if not os.path.exists(origen):
+#         print(f"Error: El directorio de origen '{origen}' no existe.")
+#         return
+
+#     # Comprobamos si la ruta de origen termina en barra para decidir el destino base
+#     # Si no termina en barra, añadimos el nombre de la carpeta de origen al destino
+#     if origen_raw.endswith(os.sep) or (os.altsep and origen_raw.endswith(os.altsep)):
+#         base_destino = destino
+#     else:
+#         base_destino = os.path.join(destino, os.path.basename(origen))
+
+#     # Recorremos el árbol de directorios de origen
+#     for root, dirs, files in os.walk(origen):
+#         dirs.sort()
+#         # 1. Calculamos la ruta relativa respecto al origen para replicarla en el destino
+#         rel_path = os.path.relpath(root, origen)
+#         target_dir = normalizar_ruta(os.path.normpath(os.path.join(base_destino, rel_path)))
+
+#         # 2. Procesamos los archivos
+#         for nombre_archivo in sorted(files):
+#             if nombre_archivo.lower().endswith(
+#                 ".mkv"
+#             ) or nombre_archivo.lower().endswith(".mp4"):                
+#                 nombre_sin_ext = os.path.splitext(nombre_archivo)[0]
+#                 nombre_sin_ext_normalizado = normalizar_ruta(nombre_sin_ext)
+#                 if os.path.exists(
+#                     os.path.join(root, nombre_sin_ext + ".ok")
+#                 ) or os.path.exists(os.path.join(root, nombre_sin_ext + ".err")):
+#                     continue
+#                 if os.path.exists(
+#                     os.path.join(root, nombre_sin_ext_normalizado + ".ok")
+#                 ) or os.path.exists(os.path.join(root, nombre_sin_ext_normalizado + ".err")):
+#                     continue
+#                 ruta_entrada = os.path.join(root, nombre_archivo)
+
+#                 nombre_base = os.path.splitext(nombre_archivo)[0]
+#                 subextension = ".q20"
+#                 if cartoon:
+#                     subextension += ".crt"
+#                 ruta_salida = normalizar_ruta(os.path.join(
+#                     target_dir, nombre_base + subextension + ".mp4"
+#                 ))
+
+#                 # Definimos la ruta completa del log para no tener dudas
+#                 ruta_log = normalizar_ruta(os.path.join(target_dir, nombre_base + subextension + ".log"))
+
+#                 print(f"Optimizando: {ruta_entrada} -> {ruta_salida}")
+
+#                 if not os.path.exists(target_dir):
+#                     os.makedirs(target_dir)
+#                     print(f"Carpeta creada: {target_dir}")
+
+#                 try:
+#                     with open(ruta_log, "w", encoding="utf-8") as f_log:
+#                         lista_comando = [
+#                             sys.executable,
+#                             VIDEO_OPTIMIZER_PY,
+#                         ]
+#                         if cartoon:
+#                             lista_comando.append("-c")
+#                         lista_comando.append(ruta_entrada)
+#                         lista_comando.append(ruta_salida)
+#                         comando_para_leer = subprocess.list2cmdline(lista_comando)
+#                         print(f"\nDEBUG - Comando ejecutado:\n{comando_para_leer}\n")
+#                         subprocess.run(
+#                             lista_comando,
+#                             check=True,
+#                             stdout=f_log,
+#                             stderr=subprocess.STDOUT,
+#                             cwd=target_dir,
+#                         )
+#                 except subprocess.CalledProcessError as e:
+#                     print(f"Error en {nombre_archivo}. Revisa el log: {ruta_log}")
+#                 except FileNotFoundError:
+#                     print(f"Error: No se encontró el optimizador o Python3. Revisa la ruta: {VIDEO_OPTIMIZER_PY}")
 
 
 if __name__ == "__main__":

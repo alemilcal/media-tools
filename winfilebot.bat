@@ -7,16 +7,17 @@ set "OUTPUT_DIR=E:\transcode\input-film\shows"
 set "FILEBOT_EXE=C:\bin\filebot\filebot.exe"
 set "ACTION=copy"
 
-:: Procesar argumentos uno a uno con SHIFT para no romper las rutas con espacios
 :parse
-if "%~1"=="" goto end_parse
-if /i "%~1"=="-c" (
+:: Guardamos el argumento en una variable temporal ANTES de compararlo
+set "current_arg=%~1"
+if "!current_arg!"=="" goto end_parse
+
+if /i "!current_arg!"=="-c" (
     set "OUTPUT_DIR=E:\transcode\input-cartoon\shows"
-) else if /i "%~1"=="-n" (
+) else if /i "!current_arg!"=="-n" (
     set "ACTION=test"
 ) else (
-    :: %~1 quita las comillas exteriores, pero guarda la ruta completa con sus espacios
-    set "INPUT_DIR=%~1"
+    set "INPUT_DIR=!current_arg!"
 )
 shift
 goto parse
@@ -24,12 +25,13 @@ goto parse
 
 :: Comprobar si se ha pasado una carpeta
 if "!INPUT_DIR!"=="" (
-    echo [ERROR] Por favor, especifica la carpeta de entrada.
-    echo Uso: %~n0 [-c para cartoon] [-n para test] "ruta de carpeta"
+    echo [ERROR] Falta la carpeta de entrada.
+    echo Uso: %~n0 [-c] [-n] "ruta"
     pause
     exit /b
 )
 
+echo -------------------------------------------------------
 echo Procesando: "!INPUT_DIR!"
 echo Destino:    "!OUTPUT_DIR!"
 echo Accion:     !ACTION!

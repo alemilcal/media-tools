@@ -8,53 +8,53 @@ set "FILEBOT_EXE=C:\bin\filebot\filebot.exe"
 set "ACTION=copy"
 
 :parse
-:: Guardamos el argumento en una variable temporal ANTES de compararlo
-set "current_arg=%~1"
-if "!current_arg!"=="" goto end_parse
+set "arg=%~1"
+if "!arg!"=="" goto end_parse
 
-if /i "!current_arg!"=="-c" (
+:: Comparaciones usando saltos GOTO para evitar el error de paréntesis
+if /i "!arg!"=="-c" (
     set "OUTPUT_DIR=E:\transcode\input-cartoon\shows"
-) else if /i "!current_arg!"=="-n" (
-    set "ACTION=test"
-) else (
-    set "INPUT_DIR=!current_arg!"
+    goto next_arg
 )
+if /i "!arg!"=="-n" (
+    set "ACTION=test"
+    goto next_arg
+)
+
+:: Si no es un flag, es la ruta de entrada
+set "INPUT_DIR=!arg!"
+
+:next_arg
 shift
 goto parse
 :end_parse
 
-:: Comprobar si se ha pasado una carpeta
+:: Verificación de seguridad
 if "!INPUT_DIR!"=="" (
-    echo [ERROR] Falta la carpeta de entrada.
-    echo Uso: %~n0 [-c] [-n] "ruta"
+    echo [ERROR] No has indicado la carpeta de entrada.
     pause
     exit /b
 )
 
 echo -------------------------------------------------------
-echo Procesando: "!INPUT_DIR!"
-echo Destino:    "!OUTPUT_DIR!"
-echo Accion:     !ACTION!
+echo PROCESANDO: "!INPUT_DIR!"
+echo DESTINO:    "!OUTPUT_DIR!"
+echo ACCION:     !ACTION!
 echo -------------------------------------------------------
 
-:: Si es modo copy, hacemos un test previo
+:: Si es modo COPY, primero forzamos un TEST silencioso para seguridad
 if "!ACTION!"=="copy" (
-    echo [PREVIEW] Ejecutando test previo...
-    "!FILEBOT_EXE!" -rename "!INPUT_DIR!" ^
-     --output "!OUTPUT_DIR!" ^
-     --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^
-     --db TheMovieDB::TV ^
-     -non-strict ^
-     --action test
+    echo [PREVIEW] Verificando nombres...
+    "!FILEBOT_EXE!" -rename "!INPUT_DIR!" --output "!OUTPUT_DIR!" --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" --db TheMovieDB::TV -non-strict --action test
     
     echo.
     echo -------------------------------------------------------
-    echo Presiona una tecla para confirmar la COPIA REAL...
+    echo Si el test anterior es correcto, PULSA UNA TECLA PARA COPIAR.
     echo -------------------------------------------------------
-    pause
+    pause > nul
 )
 
-:: Ejecución final
+:: Ejecución final de FileBot
 "!FILEBOT_EXE!" -rename "!INPUT_DIR!" ^
  --output "!OUTPUT_DIR!" ^
  --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^

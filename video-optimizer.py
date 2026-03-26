@@ -41,6 +41,9 @@ MEDIAINFO_BIN = "mediainfo"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SUBTITLE_CONVERTER_PY = os.path.join(BASE_DIR, "subtitle-converter.py")
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    
 if not os.name == "posix":
     FFMPEG_BIN = f"{FFMPEG_BIN}.exe"
     MEDIAINFO_BIN = f"{MEDIAINFO_BIN}.exe"

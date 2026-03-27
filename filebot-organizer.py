@@ -2,63 +2,88 @@ import subprocess
 import argparse
 import sys
 import os
+from pathlib import Path
 
-def run_filebot():
+def run_command(cmd):
+    """Ejecuta el comando y devuelve el código de salida."""
+    try:
+        # Usamos lista para evitar problemas con espacios y paréntesis
+        result = subprocess.run(cmd, check=False)
+        return result.returncode
+    except FileNotFoundError:
+        print("\n[ERROR] No se encontró el ejecutable de FileBot. Revisa la ruta.")
+        return 1
+
+def main():
     parser = argparse.ArgumentParser(description="Organizador de series con FileBot")
-    parser.add_argument("input", help="Carpeta de entrada")
+    parser.add_argument("input", help="Carpeta o archivo de entrada")
     parser.add_argument("-c", "--cartoon", action="store_true", help="Usar destino de dibujos/anime")
-    parser.add_argument("-n", "--test", action="store_true", help="Modo test (dry run)")
-    parser.add_argument("-t", "--title", help="Forzar título de búsqueda")
+    parser.add_argument("-n", "--test_only", action="store_true", help="Solo hacer test, no preguntar para copiar")
+    parser.add_argument("-t", "--title", help="Forzar título de búsqueda (query)")
     parser.add_argument("-s", "--season", help="Forzar número de temporada")
 
     args = parser.parse_args()
 
     # --- CONFIGURACIÓN DE RUTAS ---
-    # Ajusta estas rutas según tu sistema (puedes usar rutas de Linux si lo usas allí)
-    if os.name == 'nt':  # Windows
+    input_path = Path(args.input).resolve()
+    if not input_path.exists():
+        print(f"[ERROR] La ruta de entrada no existe: {input_path}")
+        sys.exit(1)
+
+    if os.name == 'nt': # Windows
         base_output = "E:/transcode/input-cartoon/shows" if args.cartoon else "E:/transcode/input-film/shows"
         filebot_exe = "C:/bin/filebot/filebot.exe"
-    else:  # Linux/Mac
+    else: # Linux
         base_output = "/mnt/e/transcode/input-cartoon/shows" if args.cartoon else "/mnt/e/transcode/input-film/shows"
         filebot_exe = "filebot"
 
-    # --- CONSTRUCCIÓN DEL FORMATO ---
-    # Usamos la expresión que ya sabemos que funciona para Season 00/01
+    # --- CONFIGURACIÓN DE FILEBOT ---
     fmt = "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}"
-
-    # --- CONSTRUCCIÓN DEL COMANDO ---
-    cmd = [
-        filebot_exe, "-rename", args.input,
+    
+    # Construcción base del comando
+    base_cmd = [
+        filebot_exe, "-rename", str(input_path),
         "--output", base_output,
         "--format", fmt,
         "--db", "TheMovieDB::TV",
-        "-non-strict",
-        "--action", "test" if args.test else "copy"
+        "-non-strict"
     ]
 
-    # Agregar parámetros opcionales si existen
     if args.title:
-        cmd.extend(["--q", args.title])
+        base_cmd.extend(["--q", args.title])
     
     if args.season:
-        cmd.extend(["--filter", f"s == {args.season}"])
+        # Filtro más robusto: si es 0, buscamos temporada 0 o episodios especiales
+        if args.season == "0":
+            base_cmd.extend(["--filter", "s == 0 || special"])
+        else:
+            base_cmd.extend(["--filter", f"s == {args.season}"])
 
-    # --- EJECUCIÓN ---
-    print(f"--- Ejecutando FileBot ---")
-    print(f"Entrada: {args.input}")
-    print(f"Destino: {base_output}")
-    print(f"Acción: {'TEST' if args.test else 'COPY'}")
-    if args.title: print(f"Título forzado: {args.title}")
-    if args.season: print(f"Temporada forzada: {args.season}")
-    print("-" * 30)
+    # --- PASO 1: TEST (PREVIEW) ---
+    print(f"\n[1/2] EJECUTANDO PREVISUALIZACIÓN (TEST)...")
+    print("-" * 50)
+    test_cmd = base_cmd + ["--action", "test"]
+    exit_code = run_command(test_cmd)
 
-    try:
-        # shell=False evita que los paréntesis y espacios rompan el comando
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        print(f"Error: No se encontró FileBot en {filebot_exe}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error en la ejecución de FileBot: {e}")
+    if exit_code != 0:
+        print(f"\n[!] FileBot no pudo identificar los archivos o hubo un error (Code {exit_code}).")
+        sys.exit(exit_code)
+
+    if args.test_only:
+        print("\nModo test finalizado.")
+        sys.exit(0)
+
+    # --- PASO 2: CONFIRMACIÓN ---
+    print("-" * 50)
+    confirm = input("¿Los nombres son correctos? ¿Proceder con la COPIA? (s/n): ").lower()
+
+    if confirm == 's':
+        print(f"\n[2/2] COPIANDO ARCHIVOS...")
+        copy_cmd = base_cmd + ["--action", "copy"]
+        run_command(copy_cmd)
+        print("\n¡Proceso completado!")
+    else:
+        print("\nOperación cancelada por el usuario.")
 
 if __name__ == "__main__":
-    run_filebot()
+    main()

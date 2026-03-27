@@ -6,29 +6,18 @@ set "INPUT_DIR="
 set "OUTPUT_DIR=E:\transcode\input-film\shows"
 set "FILEBOT_EXE=C:\bin\filebot\filebot.exe"
 set "ACTION=copy"
-set "SEARCH_TITLE="
-set "SEASON_FILTER="
 
 :parse
 set "arg=%~1"
 if "!arg!"=="" goto end_parse
 
+:: Comparaciones usando saltos GOTO para evitar el error de paréntesis
 if /i "!arg!"=="-c" (
     set "OUTPUT_DIR=E:\transcode\input-cartoon\shows"
     goto next_arg
 )
 if /i "!arg!"=="-n" (
     set "ACTION=test"
-    goto next_arg
-)
-if /i "!arg!"=="-t" (
-    shift
-    set "SEARCH_TITLE=%~1"
-    goto next_arg
-)
-if /i "!arg!"=="-s" (
-    shift
-    set "SEASON_FILTER=%~1"
     goto next_arg
 )
 
@@ -47,25 +36,16 @@ if "!INPUT_DIR!"=="" (
     exit /b
 )
 
-:: Construcción de parámetros extra
-set "EXTRA_PARAMS="
-if not "!SEARCH_TITLE!"=="" set EXTRA_PARAMS=!EXTRA_PARAMS! --q "!SEARCH_TITLE!"
-if not "!SEASON_FILTER!"=="" set EXTRA_PARAMS=!EXTRA_PARAMS! --filter "s == !SEASON_FILTER!"
-
 echo -------------------------------------------------------
 echo PROCESANDO: "!INPUT_DIR!"
 echo DESTINO:    "!OUTPUT_DIR!"
 echo ACCION:     !ACTION!
-if not "!SEARCH_TITLE!"=="" echo TITULO:     !SEARCH_TITLE!
-if not "!SEASON_FILTER!"=="" echo TEMPORADA:   !SEASON_FILTER!
 echo -------------------------------------------------------
 
 :: Si es modo COPY, primero forzamos un TEST silencioso para seguridad
 if "!ACTION!"=="copy" (
     echo [PREVIEW] Verificando nombres...
-    "!FILEBOT_EXE!" -rename "!INPUT_DIR!" --output "!OUTPUT_DIR!" ^
-     --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^
-     --db TheMovieDB::TV -non-strict !EXTRA_PARAMS! --action test
+    "!FILEBOT_EXE!" -rename "!INPUT_DIR!" --output "!OUTPUT_DIR!" --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" --db TheMovieDB::TV -non-strict --action test
     
     echo.
     echo -------------------------------------------------------
@@ -80,7 +60,6 @@ if "!ACTION!"=="copy" (
  --format "{n}/Season {any{s.pad(2)}{episode.season.pad(2)}{'00'}}/{n} {s00e00} {t}" ^
  --db TheMovieDB::TV ^
  -non-strict ^
- !EXTRA_PARAMS! ^
  --action !ACTION!
 
 echo -------------------------------------------------------

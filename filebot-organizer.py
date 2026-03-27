@@ -5,8 +5,7 @@ import os
 from pathlib import Path
 
 def run_filebot(cmd):
-    """Ejecuta FileBot y muestra la salida en tiempo real."""
-    # Usamos shell=False y lista para máxima seguridad con rutas
+    """Ejecuta FileBot y muestra la salida."""
     result = subprocess.run(cmd, capture_output=False, text=True)
     return result.returncode
 
@@ -25,7 +24,7 @@ def main():
         print(f"Error: No existe {input_path}")
         sys.exit(1)
 
-    # Configuración de ejecutables y rutas
+    # Configuración de rutas
     if os.name == 'nt':
         base_out = "E:/transcode/input-cartoon/shows" if args.cartoon else "E:/transcode/input-film/shows"
         filebot_exe = "C:/bin/filebot/filebot.exe"
@@ -33,7 +32,6 @@ def main():
         base_out = "/mnt/e/transcode/input-cartoon/shows" if args.cartoon else "/mnt/e/transcode/input-film/shows"
         filebot_exe = "filebot"
 
-    # Formato de salida (Season 00, etc.)
     fmt = "{n}/Season {any{s.pad(2)}{'00'}}/{n} {s00e00} {t}"
     
     cmd_base = [
@@ -44,31 +42,26 @@ def main():
         "-non-strict"
     ]
 
-    # Si pasamos un título o ID
     if args.title:
         cmd_base.extend(["--q", args.title])
     
-    # Filtro de temporada
     if args.season:
         if args.season == "0":
-            # Filtro ultra-flexible para especiales
-            cmd_base.extend(["--filter", "s == 0 || special || !regular"])
+            # FILTRO CORREGIDO: Acepta temporada 0, o que el nombre sea Specials, o que no sea episodio regular
+            cmd_base.extend(["--filter", "s == 0 || s.name =~ /Specials/ || !regular"])
         else:
             cmd_base.extend(["--filter", f"s == {args.season}"])
 
     # --- PASO 1: TEST ---
-    print(f"\n>>> [TEST] Analizando carpeta: {input_path.name}")
-    print("-" * 60)
+    print(f"\n>>> [TEST] Analizando: {input_path.name}")
     test_cmd = cmd_base + ["--action", "test"]
     res = run_filebot(test_cmd)
     
-    # 0 = Éxito, 3 = Éxito parcial (algunos archivos no matchearon)
     if res not in [0, 3]:
-        print(f"\n[!] FileBot no encontró resultados. Prueba usando el ID de TMDB con -t")
+        print(f"\n[!] Error: FileBot no encontró nada. Intenta usar el ID 62171 con -t")
         sys.exit(res)
 
-    if args.test:
-        sys.exit(0)
+    if args.test: sys.exit(0)
 
     # --- PASO 2: CONFIRMACIÓN ---
     print("\n" + "="*60)
@@ -78,7 +71,7 @@ def main():
         print("\n>>> Ejecutando COPIA real...")
         copy_cmd = cmd_base + ["--action", "copy"]
         run_filebot(copy_cmd)
-        print("\n¡Hecho!")
+        print("\n¡Proceso finalizado!")
     else:
         print("\nOperación cancelada.")
 

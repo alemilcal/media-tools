@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 
 def run_filebot(cmd):
-    """Ejecuta FileBot y devuelve el código de salida."""
-    # Usamos stdout=None para que FileBot imprima directamente en la consola
+    """Ejecuta FileBot y muestra la salida en tiempo real."""
+    # Usamos shell=False y lista para máxima seguridad con rutas
     result = subprocess.run(cmd, capture_output=False, text=True)
     return result.returncode
 
@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description="Organizador Pro con FileBot")
     parser.add_argument("input", help="Carpeta de entrada")
     parser.add_argument("-c", "--cartoon", action="store_true", help="Destino: Cartoon/Anime")
-    parser.add_argument("-t", "--title", help="Forzar título de búsqueda")
+    parser.add_argument("-t", "--title", help="Forzar título o ID de TMDB")
     parser.add_argument("-s", "--season", help="Forzar número de temporada")
     parser.add_argument("-n", "--test", action="store_true", help="Solo modo test")
 
@@ -25,6 +25,7 @@ def main():
         print(f"Error: No existe {input_path}")
         sys.exit(1)
 
+    # Configuración de ejecutables y rutas
     if os.name == 'nt':
         base_out = "E:/transcode/input-cartoon/shows" if args.cartoon else "E:/transcode/input-film/shows"
         filebot_exe = "C:/bin/filebot/filebot.exe"
@@ -32,6 +33,7 @@ def main():
         base_out = "/mnt/e/transcode/input-cartoon/shows" if args.cartoon else "/mnt/e/transcode/input-film/shows"
         filebot_exe = "filebot"
 
+    # Formato de salida (Season 00, etc.)
     fmt = "{n}/Season {any{s.pad(2)}{'00'}}/{n} {s00e00} {t}"
     
     cmd_base = [
@@ -39,28 +41,30 @@ def main():
         "--output", base_out,
         "--format", fmt,
         "--db", "TheMovieDB::TV",
-        "-non-strict",
-        # MAPPER: Limpia corchetes y la palabra Especial para facilitar el match
-        "--mapper", "f.name.replaceAll(/\\[.*?\\]/, '').replaceAll(/Especial/, 'Special')"
+        "-non-strict"
     ]
 
+    # Si pasamos un título o ID
     if args.title:
         cmd_base.extend(["--q", args.title])
     
+    # Filtro de temporada
     if args.season:
         if args.season == "0":
-            cmd_base.extend(["--filter", "!regular || s == 0"])
+            # Filtro ultra-flexible para especiales
+            cmd_base.extend(["--filter", "s == 0 || special || !regular"])
         else:
             cmd_base.extend(["--filter", f"s == {args.season}"])
 
     # --- PASO 1: TEST ---
-    print(f"\n>>> [TEST] Analizando: {input_path.name}")
+    print(f"\n>>> [TEST] Analizando carpeta: {input_path.name}")
+    print("-" * 60)
     test_cmd = cmd_base + ["--action", "test"]
     res = run_filebot(test_cmd)
     
-    # 0 = Éxito total, 3 = Éxito parcial (algunos archivos no coincidieron)
+    # 0 = Éxito, 3 = Éxito parcial (algunos archivos no matchearon)
     if res not in [0, 3]:
-        print(f"\n[!] Error crítico: FileBot no pudo procesar nada (Code {res}).")
+        print(f"\n[!] FileBot no encontró resultados. Prueba usando el ID de TMDB con -t")
         sys.exit(res)
 
     if args.test:
@@ -68,14 +72,13 @@ def main():
 
     # --- PASO 2: CONFIRMACIÓN ---
     print("\n" + "="*60)
-    print("REVISA EL TEST: Si los archivos están bien emparejados, confirma.")
     confirmar = input("¿Confirmas la operación? (s/n): ").lower()
     
     if confirmar == 's':
         print("\n>>> Ejecutando COPIA real...")
         copy_cmd = cmd_base + ["--action", "copy"]
         run_filebot(copy_cmd)
-        print("\n¡Proceso finalizado!")
+        print("\n¡Hecho!")
     else:
         print("\nOperación cancelada.")
 

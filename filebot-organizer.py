@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 
 def run_filebot(cmd):
-    """Ejecuta FileBot y muestra la salida."""
+    """Ejecuta FileBot y muestra la salida en tiempo real."""
+    # Eliminamos capturas complejas para que veas todo lo que dice FileBot
     result = subprocess.run(cmd, capture_output=False, text=True)
     return result.returncode
 
@@ -24,7 +25,7 @@ def main():
         print(f"Error: No existe {input_path}")
         sys.exit(1)
 
-    # Configuración de rutas
+    # Configuración de rutas según SO
     if os.name == 'nt':
         base_out = "E:/transcode/input-cartoon/shows" if args.cartoon else "E:/transcode/input-film/shows"
         filebot_exe = "C:/bin/filebot/filebot.exe"
@@ -32,6 +33,7 @@ def main():
         base_out = "/mnt/e/transcode/input-cartoon/shows" if args.cartoon else "/mnt/e/transcode/input-film/shows"
         filebot_exe = "filebot"
 
+    # Formato de salida: Forzamos Season 00 para los especiales
     fmt = "{n}/Season {any{s.pad(2)}{'00'}}/{n} {s00e00} {t}"
     
     cmd_base = [
@@ -42,36 +44,42 @@ def main():
         "-non-strict"
     ]
 
+    # Usar ID o Título
     if args.title:
         cmd_base.extend(["--q", args.title])
     
+    # Lógica de filtro blindada
     if args.season:
         if args.season == "0":
-            # FILTRO CORREGIDO: Acepta temporada 0, o que el nombre sea Specials, o que no sea episodio regular
-            cmd_base.extend(["--filter", "s == 0 || s.name =~ /Specials/ || !regular"])
+            # Filtro "Atrapalotodo" para especiales: 
+            # Si el episodio es especial O la temporada es 0 O la temporada no es > 0
+            cmd_base.extend(["--filter", "special || any{s}{0} == 0"])
         else:
             cmd_base.extend(["--filter", f"s == {args.season}"])
 
     # --- PASO 1: TEST ---
-    print(f"\n>>> [TEST] Analizando: {input_path.name}")
+    print(f"\n>>> [TEST] Analizando carpeta: {input_path.name}")
+    print("-" * 60)
     test_cmd = cmd_base + ["--action", "test"]
     res = run_filebot(test_cmd)
     
+    # 0 = Éxito, 3 = Parcial, 100+ = No encontrado
     if res not in [0, 3]:
-        print(f"\n[!] Error: FileBot no encontró nada. Intenta usar el ID 62171 con -t")
+        print(f"\n[!] FileBot no encontró resultados.")
         sys.exit(res)
 
-    if args.test: sys.exit(0)
+    if args.test:
+        sys.exit(0)
 
     # --- PASO 2: CONFIRMACIÓN ---
-    print("\n" + "="*60)
+    print("\n" + "="*50)
     confirmar = input("¿Confirmas la operación? (s/n): ").lower()
     
     if confirmar == 's':
-        print("\n>>> Ejecutando COPIA real...")
+        print("\n>>> Copiando archivos reales...")
         copy_cmd = cmd_base + ["--action", "copy"]
         run_filebot(copy_cmd)
-        print("\n¡Proceso finalizado!")
+        print("\n¡Hecho!")
     else:
         print("\nOperación cancelada.")
 

@@ -6,7 +6,9 @@ from pathlib import Path
 
 def run_filebot(cmd):
     """Ejecuta FileBot y devuelve el código de salida."""
-    return subprocess.run(cmd, check=False).returncode
+    # Usamos stdout=None para que FileBot imprima directamente en la consola
+    result = subprocess.run(cmd, capture_output=False, text=True)
+    return result.returncode
 
 def main():
     parser = argparse.ArgumentParser(description="Organizador Pro con FileBot")
@@ -18,21 +20,18 @@ def main():
 
     args = parser.parse_args()
 
-    # --- CONFIGURACIÓN DE RUTAS ---
     input_path = Path(args.input).resolve()
     if not input_path.exists():
-        print(f"Error: No existe la ruta {input_path}")
+        print(f"Error: No existe {input_path}")
         sys.exit(1)
 
-    if os.name == 'nt': # Windows
+    if os.name == 'nt':
         base_out = "E:/transcode/input-cartoon/shows" if args.cartoon else "E:/transcode/input-film/shows"
         filebot_exe = "C:/bin/filebot/filebot.exe"
-    else: # Linux
+    else:
         base_out = "/mnt/e/transcode/input-cartoon/shows" if args.cartoon else "/mnt/e/transcode/input-film/shows"
         filebot_exe = "filebot"
 
-    # --- LÓGICA DE FORMATO Y FILTRO ---
-    # Usamos una expresión que cubra todos los casos de Season 0
     fmt = "{n}/Season {any{s.pad(2)}{'00'}}/{n} {s00e00} {t}"
     
     cmd_base = [
@@ -40,43 +39,43 @@ def main():
         "--output", base_out,
         "--format", fmt,
         "--db", "TheMovieDB::TV",
-        "-non-strict"
+        "-non-strict",
+        # MAPPER: Limpia corchetes y la palabra Especial para facilitar el match
+        "--mapper", "f.name.replaceAll(/\\[.*?\\]/, '').replaceAll(/Especial/, 'Special')"
     ]
 
     if args.title:
         cmd_base.extend(["--q", args.title])
     
     if args.season:
-        # Si pides temporada 0, filtramos por lo que NO es regular (especiales)
-        # Si pides otra temporada, usamos el número normal
         if args.season == "0":
             cmd_base.extend(["--filter", "!regular || s == 0"])
         else:
             cmd_base.extend(["--filter", f"s == {args.season}"])
 
-    # --- PASO 1: PREVISUALIZACIÓN ---
+    # --- PASO 1: TEST ---
     print(f"\n>>> [TEST] Analizando: {input_path.name}")
-    print("-" * 60)
-    
     test_cmd = cmd_base + ["--action", "test"]
     res = run_filebot(test_cmd)
     
-    if res != 0:
-        print(f"\n[!] FileBot no encontró nada. Prueba cambiando el título con -t")
+    # 0 = Éxito total, 3 = Éxito parcial (algunos archivos no coincidieron)
+    if res not in [0, 3]:
+        print(f"\n[!] Error crítico: FileBot no pudo procesar nada (Code {res}).")
         sys.exit(res)
 
     if args.test:
         sys.exit(0)
 
     # --- PASO 2: CONFIRMACIÓN ---
-    print("-" * 60)
+    print("\n" + "="*60)
+    print("REVISA EL TEST: Si los archivos están bien emparejados, confirma.")
     confirmar = input("¿Confirmas la operación? (s/n): ").lower()
     
     if confirmar == 's':
-        print("\n>>> Copiando archivos reales...")
+        print("\n>>> Ejecutando COPIA real...")
         copy_cmd = cmd_base + ["--action", "copy"]
         run_filebot(copy_cmd)
-        print("\n¡Completado con éxito!")
+        print("\n¡Proceso finalizado!")
     else:
         print("\nOperación cancelada.")
 

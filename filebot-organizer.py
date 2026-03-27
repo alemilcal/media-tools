@@ -37,7 +37,7 @@ def main():
 
     if args.title: cmd.extend(["--q", args.title])
     # Importante: Si usamos este formato, el filtro -s debe ser más permisivo
-    if args.season: cmd.extend(["--filter", f"s == {args.season} || special"])
+    if args.season: cmd.extend(["--filter", f"s == {args.season}"])
 
     print(f"\n>>> [TEST] Analizando con formato de foro: {input_path.name}")
     run_filebot(cmd + ["--action", "test"])

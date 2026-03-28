@@ -273,8 +273,11 @@ def process_path(p, numfile):
             fck = pb[:-4] + "%d" % (idx) + e
             idx = idx + 1
         pb = fck
-        shutil.move(p, pb)
-        print("Renamed: ", p, " -> ", pb)
+        if args.z:
+            print("[DRY RUN] Would rename: ", p, " -> ", pb)
+        else:
+            shutil.move(p, pb)
+            print("Renamed: ", p, " -> ", pb)
     if args.j:  # jpeg EXIF mode
         c = r'jhead -exonly -nf%%Y-%%m-%%d\ %%H.%%M.%%S "%s";jhead -ft "%s"' % (pb, pb)
         # qqlib.execute_command(c,args.z)

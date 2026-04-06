@@ -12,7 +12,7 @@ API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_nombre_busqueda(texto):
-    """Elimina etiquetas técnicas y limpia símbolos para la API."""
+    """Elimina etiquetas técnicas y limpia símbolos."""
     tags = [r'\b\d{3,4}p\b', r'\b\d[kK]\b', r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b']
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
@@ -20,7 +20,6 @@ def limpiar_nombre_busqueda(texto):
     return " ".join(texto.split()).strip()
 
 def extraer_datos_locales(ruta_completa):
-    """Extrae estudio de la carpeta y datos del nombre del archivo."""
     path_abs = os.path.abspath(ruta_completa)
     estudio = os.path.basename(os.path.dirname(path_abs))
     nombre_archivo = os.path.basename(path_abs)
@@ -70,51 +69,48 @@ def buscar_y_procesar(archivo_input, interactivo=False, renombrar=False):
             print("[!] No se encontró nada en la API.")
             return
 
-        # Selección de resultado
-        if interactivo and len(res) > 1:
-            print(f"\n[?] Selecciona opción (1-{len(res)}):")
-            for i, r in enumerate(res[:5]):
-                print(f"  {i+1}. {r['title']} ({r['date']}) - {r.get('site',{}).get('name')}")
-            sel = int(input("Elección: ") or 1)
-            escena = res[sel-1]
+        # Selección de resultado (Ahora siempre pregunta si -i está activo)
+        if interactivo:
+            print(f"\n[?] Resultados encontrados ({len(res)}):")
+            for i, r in enumerate(res[:10]): # Mostramos hasta 10 opciones
+                sitio = r.get('site', {}).get('name', 'N/A')
+                print(f"  {i+1}. [{r['id']}] {r['title']} ({r['date']}) - {sitio}")
+            
+            try:
+                sel = int(input("\nSelecciona el número (0 para cancelar): ") or 0)
+                if sel == 0: return
+                escena = res[sel-1]
+            except (ValueError, IndexError):
+                print("[!] Selección no válida.")
+                return
         else:
             escena = res[0]
 
-        # Preparar datos oficiales
+        # Datos oficiales
         estudio_api = escena.get('site', {}).get('name', info['estudio'])
         fecha_api = escena.get('date', '0000-00-00').replace('-', '.')
         titulo_api = escena.get('title', info['titulo_busqueda'])
         actrices = escena.get('performers', [])
         actriz_str = f" - {actrices[0]['name']}" if actrices else ""
 
-        # Nombre base (limpio de caracteres raros)
         nombre_estandar = re.sub(r'[\\/:*?"<>|]', '', f"{estudio_api} {fecha_api} {titulo_api}{actriz_str}")
-        print(f"[+] Escena ID: {escena['id']} | {nombre_estandar}")
-
-        # Definir nombre de los archivos a generar
         prefijo_nombre = nombre_estandar if renombrar else info['original_base_name']
 
-        # 1. Gestionar Póster y Fanart
+        # 1. Póster y Fanart
         img_url = escena.get('image')
         if img_url:
-            print("[*] Descargando imagen...", end=' ', flush=True)
+            print("[*] Descargando imágenes...", end=' ', flush=True)
             img_data = requests.get(img_url).content
             _, ext_img = os.path.splitext(img_url.split('?')[0])
             ext_img = ext_img if ext_img else ".jpg"
             
-            # Guardar el póster principal
-            ruta_poster = os.path.join(info['directorio'], f"{prefijo_nombre}{ext_img}")
-            with open(ruta_poster, 'wb') as f:
-                f.write(img_data)
-            
-            # Guardar la copia -fanart
-            ruta_fanart = os.path.join(info['directorio'], f"{prefijo_nombre}-fanart{ext_img}")
-            with open(ruta_fanart, 'wb') as f:
-                f.write(img_data)
-            
+            for sufijo in ["", "-fanart"]:
+                ruta = os.path.join(info['directorio'], f"{prefijo_nombre}{sufijo}{ext_img}")
+                with open(ruta, 'wb') as f:
+                    f.write(img_data)
             print("Póster y Fanart OK.")
 
-        # 2. Renombrar vídeo si se solicita
+        # 2. Renombrar
         if renombrar:
             nueva_ruta_video = os.path.join(info['directorio'], f"{nombre_estandar}{info['extension_video']}")
             if info['original_full_path'] != nueva_ruta_video:

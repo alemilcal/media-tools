@@ -42,7 +42,7 @@ def organizar_peliculas(ruta_base, dry_run):
             continue
 
         # --- CASO A: Es un ARCHIVO MKV suelto ---
-        if item.is_file() and item.suffix.lower() == ".mkv":
+        if item.is_file() and (item.suffix.lower() == ".mkv" or item.suffix.lower() == ".mp4"):
             nombre_carpeta = limpiar_nombre_carpeta(item.name)
             inicial = nombre_carpeta[0].lower()
             if not inicial.isalnum():

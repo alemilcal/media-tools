@@ -6,111 +6,130 @@ import os
 import sys
 import argparse
 import re
-import shutil
 
 # Configuración
 API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
-def extraer_campos(nombre_archivo):
-    """
-    Usa Regex para separar: Studio, Fecha (YYYY-MM-DD) y Titulo.
-    Soporta separadores de espacio o guion bajo.
-    """
-    nombre_sin_ext, _ = os.path.splitext(os.path.basename(nombre_archivo))
+def limpiar_nombre_busqueda(texto):
+    """Elimina etiquetas técnicas y limpia símbolos."""
+    tags = [r'\b\d{3,4}p\b', r'\b\d[kK]\b', r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b']
+    for tag in tags:
+        texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
+    texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
+    return " ".join(texto.split()).strip()
+
+def extraer_datos_locales(ruta_completa):
+    path_abs = os.path.abspath(ruta_completa)
+    estudio = os.path.basename(os.path.dirname(path_abs))
+    nombre_archivo = os.path.basename(path_abs)
+    nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
     
-    # Patrón: (Cualquier cosa) + (Espacio o _) + (4 dígitos-2-2) + (Espacio o _) + (Resto)
-    pattern = r'^(.+?)[\s_](\d{4}-\d{2}-\d{2})[\s_](.+)$'
-    match = re.match(pattern, nombre_sin_ext)
-    
+    # Buscar fecha
+    patron_fecha = r'(\d{4}|\d{2})[\._\-\s](\d{2})[\._\-\s](\d{2}|\d{4})'
+    match = re.search(patron_fecha, nombre_sin_ext)
+    fecha_norm = None
+    titulo_raw = nombre_sin_ext
+
     if match:
-        return {
-            "studio": match.group(1).strip(),
-            "fecha": match.group(2).strip(),
-            "titulo": match.group(3).strip(),
-            "original": nombre_sin_ext
-        }
-    return None
+        g1, g2, g3 = match.groups()
+        if len(g1) == 4: fecha_norm = f"{g1}-{g2.zfill(2)}-{g3.zfill(2)}"
+        else:
+            año = "20"+g3 if len(g3)==2 else g3
+            fecha_norm = f"{año}-{g2.zfill(2)}-{g1.zfill(2)}"
+        titulo_raw = nombre_sin_ext[match.end():] or nombre_sin_ext
 
-def descargar_poster(archivo_input):
-    campos = extraer_campos(archivo_input)
+    return {
+        "estudio": limpiar_nombre_busqueda(estudio),
+        "fecha": fecha_norm,
+        "titulo_busqueda": limpiar_nombre_busqueda(titulo_raw),
+        "original_full_path": path_abs,
+        "original_base_name": nombre_sin_ext,
+        "extension_video": ext_video
+    }
+
+def buscar_y_procesar(archivo_input, interactivo=False, renombrar=False):
+    info = extraer_datos_locales(archivo_input)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
     
-    if not campos:
-        print(f"[!] Error: El formato del nombre no es válido (Studio Fecha Titulo).", flush=True)
-        print(f"    Recibido: '{archivo_input}'", flush=True)
-        return
-
-    print(f"[*] Datos extraídos:", flush=True)
-    print(f"    - Estudio: {campos['studio']}")
-    print(f"    - Fecha:   {campos['fecha']}")
-    print(f"    - Título:  {campos['titulo']}", flush=True)
-
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    # Parámetros de búsqueda avanzada
-    params = {
-        "site": campos['studio'],
-        "date": campos['fecha'],
-        "q": campos['titulo'],
-        "limit": 1  # Solo queremos el mejor resultado
-    }
+    print(f"\n[*] PROCESANDO: {info['original_base_name']}")
+    params = {"site": info['estudio'], "q": info['titulo_busqueda']}
+    if info['fecha']: params["date"] = info['fecha']
 
     try:
-        print(f"[*] Consultando búsqueda avanzada...", flush=True)
-        response = requests.get(SEARCH_URL, headers=headers, params=params, timeout=(5, 15))
-        response.raise_for_status()
-        
-        json_data = response.json()
-        
-        # El endpoint /scenes devuelve una lista en el campo 'data'
-        results = json_data.get('data', [])
-        
-        if not results:
-            print(f"[!] No se encontraron resultados específicos con esos filtros.", flush=True)
+        # Búsqueda en cascada (igual que antes)
+        res = requests.get(SEARCH_URL, headers=headers, params=params, timeout=10).json().get('data', [])
+        if not res and info['fecha']:
+            params.pop("date")
+            res = requests.get(SEARCH_URL, headers=headers, params=params, timeout=10).json().get('data', [])
+        if not res:
+            res = requests.get(SEARCH_URL, headers=headers, params={"q": info['titulo_busqueda']}, timeout=10).json().get('data', [])
+
+        if not res:
+            print("[!] No se encontró nada en la API.")
             return
 
-        # Tomamos el primer resultado
-        scene = results[0]
-        image_url = scene.get('image')
+        # Selección
+        if interactivo and len(res) > 1:
+            print(f"\n[?] Selecciona resultado (1-{len(res)}):")
+            for i, r in enumerate(res[:5]):
+                print(f"  {i+1}. {r['title']} ({r['date']}) - {r.get('site',{}).get('name')}")
+            sel = int(input("Opcion: ") or 1)
+            escena = res[sel-1]
+        else:
+            escena = res[0]
 
-        if not image_url:
-            print(f"[-] Escena encontrada pero no tiene URL de imagen.", flush=True)
-            return
-
-        print(f"[+] Resultado encontrado: {scene.get('title')} ({scene.get('site', {}).get('name')})", flush=True)
-        print(f"[*] Descargando imagen...", flush=True)
-
-        img_res = requests.get(image_url, timeout=(5, 20))
-        img_res.raise_for_status()
-
-        # Determinar extensión
-        _, img_ext = os.path.splitext(image_url.split('?')[0])
-        img_ext = img_ext if img_ext else ".jpg"
+        # Extraer datos oficiales para el nuevo nombre
+        estudio_api = escena.get('site', {}).get('name', info['estudio'])
+        fecha_api = escena.get('date', '0000-00-00').replace('-', '.')
+        titulo_api = escena.get('title', info['titulo_busqueda'])
         
-        # Guardar con el nombre original del archivo
-        nombre_salida = f"{campos['original']}{img_ext}"
+        # Actriz principal (la primera de la lista)
+        actrices = escena.get('performers', [])
+        actriz_str = f" - {actrices[0]['name']}" if actrices else ""
 
-        with open(nombre_salida, 'wb') as f:
-            f.write(img_res.content)
-        
-        print(f"[OK] ¡Éxito! Archivo guardado como: {nombre_salida}", flush=True)
-        
-        # Copiar a nombre con -fanart
-        base, ext = os.path.splitext(nombre_salida)
-        nombre_fanart = f"{base}-fanart{ext}"
-        shutil.copy(nombre_salida, nombre_fanart)
-        print(f"[OK] Copia guardada como: {nombre_fanart}", flush=True)
+        # Construcción del nombre estándar
+        nombre_estandar = f"{estudio_api} {fecha_api} {titulo_api}{actriz_str}"
+        # Limpiar caracteres no permitidos en nombres de archivo
+        nombre_estandar = re.sub(r'[\\/:*?"<>|]', '', nombre_estandar)
+
+        print(f"[+] Escena: {escena['id']} | {nombre_estandar}")
+
+        # 1. Descargar Poster
+        img_url = escena.get('image')
+        if img_url:
+            print("[*] Descargando póster...", end=' ', flush=True)
+            img_data = requests.get(img_url).content
+            _, ext_img = os.path.splitext(img_url.split('?')[0])
+            ext_img = ext_img if ext_img else ".jpg"
+            
+            # Nombre del poster depende de si renombramos el original o no
+            nombre_poster = f"{nombre_estandar}{ext_img}" if renombrar else f"{info['original_base_name']}{ext_img}"
+            ruta_poster = os.path.join(os.path.dirname(info['original_full_path']), nombre_poster)
+            
+            with open(ruta_poster, 'wb') as f:
+                f.write(img_data)
+            print("OK.")
+
+        # 2. Renombrar archivo original si se solicita
+        if renombrar:
+            nuevo_nombre_video = f"{nombre_estandar}{info['extension_video']}"
+            nueva_ruta_video = os.path.join(os.path.dirname(info['original_full_path']), nuevo_nombre_video)
+            
+            if info['original_full_path'] != nueva_ruta_video:
+                print(f"[*] Renombrando vídeo a: {nuevo_nombre_video}")
+                os.rename(info['original_full_path'], nueva_ruta_video)
+            else:
+                print("[*] El nombre ya es correcto.")
 
     except Exception as e:
-        print(f"[!] Error durante la ejecución: {e}", flush=True)
+        print(f"[!] Error: {e}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Descarga optimizada de posters")
-    parser.add_argument("archivo", help="Nombre del archivo (Studio Fecha Titulo)")
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("archivo", help="Ruta del archivo")
+    parser.add_argument("-i", "--interactive", action="store_true", help="Modo interactivo")
+    parser.add_argument("-n", "--rename", action="store_true", help="Renombrar archivo a formato estándar")
     args = parser.parse_args()
-    descargar_poster(args.archivo)
+    
+    buscar_y_procesar(args.archivo, args.interactive, args.rename)

@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import re
+import shutil
 
 # Configuración
 API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
@@ -97,6 +98,12 @@ def descargar_poster(archivo_input):
             f.write(img_res.content)
         
         print(f"[OK] ¡Éxito! Archivo guardado como: {nombre_salida}", flush=True)
+        
+        # Copiar a nombre con -fanart
+        base, ext = os.path.splitext(nombre_salida)
+        nombre_fanart = f"{base}-fanart{ext}"
+        shutil.copy(nombre_salida, nombre_fanart)
+        print(f"[OK] Copia guardada como: {nombre_fanart}", flush=True)
 
     except Exception as e:
         print(f"[!] Error durante la ejecución: {e}", flush=True)

@@ -124,9 +124,9 @@ def convertVideo():
         vfoptions  = f"scale='{videoWidth}:-2'"
         if es_hdr:
             vfoptions += f"zscale=t=linear:npl=100,tonemap=tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709"
-            print('HDR MODE')
+            print('HDR detected in input file (HDR MODE activated)')
         else:
-            print('SDR MODE')
+            print('HDR not detected in input file (SDR MODE activated)')
         vfoptions += f",format=yuv420p"
         o = (
             f" -c:v {VIDEO_CODEC} -preset faster -profile:v high -max_muxing_queue_size 9999"

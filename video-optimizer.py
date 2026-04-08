@@ -3,6 +3,7 @@
 
 
 import argparse
+import json
 import os
 import pathlib
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+
 
 ################################################################################
 # Globales:
@@ -107,6 +109,8 @@ def convertVideo():
     getSubtitleInfo()
     getSubtitleTrack()
 
+    es_hdr = obtener_info_hdr(InputFileName)
+
     o = "-movflags +faststart -sn -map_metadata -1 -map_chapters -1"
     if args.r:
         o += " -c copy -map 0:v -map 0:a"
@@ -117,9 +121,16 @@ def convertVideo():
         audioBitrate  = AUDIO_BITRATE_LQ if args.l else AUDIO_BITRATE
         audioChannels = 1                if args.l else 2
         audioSampling = "-ar 22050"      if args.l else ""
+        vfoptions  = f"scale='{videoWidth}:-2'"
+        if es_hdr:
+            vfoptions += f"zscale=t=linear:npl=100,tonemap=tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709"
+            print('HDR MODE')
+        else:
+            print('SDR MODE')
+        vfoptions += f",format=yuv420p"
         o = (
             f" -c:v {VIDEO_CODEC} -preset faster -profile:v high -max_muxing_queue_size 9999"
-            f" -crf {videoQuality} -tune {tune} -vf scale='{videoWidth}:-2',format=yuv420p -map 0:v:0"
+            f" -crf {videoQuality} -tune {tune} -vf {vfoptions} -map 0:v:0"
             f" -c:a {AUDIO_CODEC} -ac {audioChannels} -b:a {audioBitrate}k {audioSampling}"
         )
         #print(AudioTrackSelected)
@@ -384,6 +395,27 @@ def mediaInfoQuery(section, query):
     r = o.decode().lower().strip().split("#*@")[:-1]
     return r
 
+def obtener_info_hdr(archivo):
+    # Ejecutamos mediainfo pidiendo salida JSON
+    resultado = subprocess.check_output(['mediainfo', '--Output=JSON', archivo])
+    data = json.loads(resultado)
+    
+    # Buscamos la pista de vídeo (track_type == 'Video')
+    video_track = next((t for t in data['media']['track'] if t['@type'] == 'Video'), None)
+    
+    if not video_track:
+        return False
+
+    # Criterios para detectar HDR:
+    # 1. Que tenga 'HDR_Format' (HDR10, Dolby Vision, etc.)
+    # 2. O que la curva de transferencia sea PQ (smpte2084) o HLG
+    hdr_format = video_track.get('HDR_Format', '')
+    transfer = video_track.get('transfer_characteristics', '').lower()
+    
+    es_hdr = any(x in hdr_format for x in ['HDR10', 'SMPTE ST 2086', 'Dolby Vision']) or \
+             any(x in transfer for x in ['pq', 'smpte 2084', 'hlg'])
+    
+    return es_hdr
 
 ################################################################################
 # Main call:

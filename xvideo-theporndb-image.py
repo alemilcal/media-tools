@@ -16,21 +16,23 @@ def limpiar_basura(texto):
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
-        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR' # Añadido el tag VR a la limpieza
+        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR'
     ]
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
     texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
-def extraer_datos_locales(ruta_completa):
+def extraer_datos_locales(ruta_completa, sitio_forzado=None):
     path_abs = os.path.abspath(ruta_completa)
-    estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
+    
+    # 1. ESTUDIO: Forzado o por carpeta
+    estudio_final = sitio_forzado if sitio_forzado else os.path.basename(os.path.dirname(path_abs))
+    
     nombre_archivo = os.path.basename(path_abs)
     
-    # Captura de extensión y etiqueta técnica [Q20]
+    # 2. EXTENSIÓN Y TAG TÉCNICO
     match_ext = re.search(r'\.([a-z0-9]+)\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
-    
     if match_ext:
         tag_tecnico_api = f" [{match_ext.group(1).upper()}]"
         sufijo_original = f".{match_ext.group(1)}"
@@ -41,12 +43,11 @@ def extraer_datos_locales(ruta_completa):
         sufijo_original = ""
         nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
     
-    # Eliminar cadena VR del nombre base si ya existía para que no se duplique
     nombre_sin_ext = re.sub(r'_180_3D_LR', '', nombre_sin_ext, flags=re.IGNORECASE)
 
+    # 3. FECHA
     patron_fecha = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
     match_f = re.search(patron_fecha, nombre_sin_ext)
-    
     fecha_norm = None
     if match_f:
         g = match_f.groups()
@@ -56,7 +57,7 @@ def extraer_datos_locales(ruta_completa):
             fecha_norm = f"{año}-{g[4].zfill(2)}-{g[3].zfill(2)}"
 
     return {
-        "estudio_busqueda": limpiar_basura(estudio_carpeta),
+        "estudio_busqueda": limpiar_basura(estudio_final),
         "fecha": fecha_norm,
         "titulo_busqueda": limpiar_basura(nombre_sin_ext),
         "original_full_path": path_abs,
@@ -67,21 +68,22 @@ def extraer_datos_locales(ruta_completa):
         "directorio": os.path.dirname(path_abs)
     }
 
-def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False):
-    info = extraer_datos_locales(archivo_input)
+def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sitio_forzado=None):
+    info = extraer_datos_locales(archivo_input, sitio_forzado)
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
     
-    # Búsqueda
-    p = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
-    if info['fecha']: p["date"] = info['fecha']
-    
     print(f"[*] PROCESANDO: {info['original_base_name']}")
+    print(f"[*] ESTUDIO:    {info['estudio_busqueda']}")
+
+    params = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
+    if info['fecha']: params["date"] = info['fecha']
+    
     try:
-        res = requests.get(SEARCH_URL, headers=headers, params=p, timeout=12).json().get('data', [])
+        res = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12).json().get('data', [])
         if not res: res = requests.get(SEARCH_URL, headers=headers, params={"q": info['titulo_busqueda']}).json().get('data', [])
         
         if not res:
-            print("[!] No se encontró nada.")
+            print("[!] Sin resultados.")
             return
 
         if interactivo:
@@ -95,14 +97,12 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False):
         else:
             escena = res[0]
 
-        # Datos para nombre
+        # Formateo nombre
         est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
         fec_api = escena.get('date', '0000-00-00')
         tit_api = escena.get('title', 'N/A')
         perf = escena.get('performers', [])
         actriz = f" - {perf[0]['name']}" if perf else ""
-        
-        # Etiqueta VR
         tag_vr = "_180_3D_LR" if es_vr else ""
 
         if renombrar:
@@ -112,7 +112,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False):
             nombre_base_f = f"{info['original_base_name']}{tag_vr}"
             sufijo_img = info['sufijo_original']
 
-        # Imágenes
+        # Descarga imágenes
         img_url = escena.get('image')
         if img_url:
             print(f"[*] Descargando pósters...", end=' ', flush=True)
@@ -126,11 +126,11 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False):
                     f.write(img_res.content)
             print("OK.")
 
-        # Renombrar Vídeo
+        # Renombrar vídeo
         if renombrar:
             nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
             os.rename(info['original_full_path'], nueva_ruta)
-            print(f"[OK] Vídeo renombrado a: {nombre_base_f}{info['ext_video']}")
+            print(f"[OK] Renombrado.")
 
     except Exception as e:
         print(f"[!] Error: {e}")
@@ -140,6 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("archivo")
     parser.add_argument("-i", "--interactive", action="store_true")
     parser.add_argument("-n", "--rename", action="store_true")
-    parser.add_argument("-v", "--vr", action="store_true", help="Añade sufijo _180_3D_LR para VR")
+    parser.add_argument("-v", "--vr", action="store_true")
+    parser.add_argument("-s", "--site", help="Forzar estudio")
     args = parser.parse_args()
-    ejecutar(args.archivo, args.interactive, args.rename, args.vr)
+    ejecutar(args.archivo, args.interactive, args.rename, args.vr, args.site)

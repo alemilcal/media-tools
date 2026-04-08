@@ -12,14 +12,9 @@ API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto):
-    """Elimina etiquetas técnicas, calidades y corchetes para la búsqueda."""
+    """Elimina etiquetas técnicas y corchetes para la búsqueda."""
     if not texto: return ""
-    
-    # 1. Eliminar TODO lo que esté dentro de corchetes [] o paréntesis ()
-    # Esto quita [VRSpy], [Oculus], [4K], etc.
     texto = re.sub(r'[\[\(\].*?[\]\)]', '', texto)
-    
-    # 2. Etiquetas de calidad y técnica comunes
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
@@ -27,17 +22,21 @@ def limpiar_basura(texto):
     ]
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
-    
-    # 3. Limpiar símbolos y dejar solo palabras
     texto = re.sub(r'[\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
-def extraer_datos_locales(ruta_completa):
+def extraer_datos_locales(ruta_completa, sitio_forzado=None):
     path_abs = os.path.abspath(ruta_completa)
-    estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
+    
+    # ESTUDIO: Forzado por parámetro o extraído de la carpeta
+    if sitio_forzado:
+        estudio_carpeta = sitio_forzado
+    else:
+        estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
+    
     nombre_archivo = os.path.basename(path_abs)
     
-    # Captura de extensión y etiqueta técnica final (ej: .q20.mp4)
+    # Captura de extensión y etiqueta técnica [Q20]
     match_ext = re.search(r'\.([a-z0-9]+)\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
     if match_ext:
         tag_tecnico = f" [{match_ext.group(1).upper()}]"
@@ -78,53 +77,45 @@ def realizar_peticion(params):
     except: return []
 
 def buscar_inteligente(info):
-    """Prueba varias combinaciones de búsqueda para archivos difíciles."""
     estudio = info['estudio_busqueda']
-    # Limpiamos el título de corchetes y tags
     titulo_limpio = limpiar_basura(info['titulo_sucio'])
     
-    # 1. Búsqueda exacta (Sitio + Título + Fecha)
-    print(f"[*] Intentando búsqueda estricta: '{titulo_limpio}' en '{estudio}'...")
+    # 1. Búsqueda exacta
     p = {"site": estudio, "q": titulo_limpio}
     if info['fecha']: p["date"] = info['fecha']
     res = realizar_peticion(p)
     if res: return res
 
-    # 2. Si hay un guion " - ", intentar solo con la parte derecha (título real)
+    # 2. Split por guion (Actriz - Titulo)
     if " - " in titulo_limpio:
-        partes = titulo_limpio.split(" - ")
-        solo_titulo = partes[-1].strip()
-        print(f"[*] Intentando solo con título: '{solo_titulo}'...")
+        solo_titulo = titulo_limpio.split(" - ")[-1].strip()
         res = realizar_peticion({"site": estudio, "q": solo_titulo})
         if res: return res
 
-    # 3. Búsqueda global sin estudio (por si el nombre de carpeta no es exacto)
-    print(f"[*] Intentando búsqueda global por título...")
-    res = realizar_peticion({"q": titulo_limpio})
-    if res: return res
+    # 3. Búsqueda global (sin sitio)
+    return realizar_peticion({"q": titulo_limpio})
 
-    return []
-
-def ejecutar(archivo_input, interactivo=False, renombrar=False):
-    info = extraer_datos_locales(archivo_input)
+def ejecutar(archivo_input, interactivo=False, renombrar=False, sitio_forzado=None):
+    info = extraer_datos_locales(archivo_input, sitio_forzado)
     print(f"\n[*] ANALIZANDO: {archivo_input}")
+    print(f"[*] USANDO ESTUDIO: '{info['estudio_local']}'")
 
     resultados = buscar_inteligente(info)
     
     if not resultados:
-        print("[!] No se encontró nada. Prueba con el modo interactivo (-i) para búsqueda manual.")
         if interactivo:
-            manual = input("[?] Introduce búsqueda manual: ")
+            manual = input("[?] No hay resultados. Búsqueda manual: ")
             if manual: resultados = realizar_peticion({"q": manual})
         if not resultados: return
 
     # Selección
     if interactivo:
-        print(f"\n[?] Opciones encontradas:")
+        print(f"\n[?] Opciones:")
         for i, r in enumerate(resultados[:10]):
             p = r.get('performers', [])
             act = p[0]['name'] if p else "N/A"
-            print(f"  {i+1}. [{r['id']}] {r['date']} | {act} | {r['title']}")
+            sit = r.get('site', {}).get('name', 'N/A')
+            print(f"  {i+1}. [{r['id']}] {r['date']} | {sit} | {act} | {r['title']}")
         sel = int(input("\nSelecciona número (0 para cancelar): ") or 1)
         if sel == 0: return
         escena = resultados[sel-1]
@@ -138,33 +129,31 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False):
     perf = escena.get('performers', [])
     actriz = f" - {perf[0]['name']}" if perf else ""
 
-    # Formato: Estudio YYYY-MM-DD Titulo - Actriz [TAG]
     nombre_base_f = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {fecha_api} {tit_api}{actriz}{info['tag_tecnico']}")
     prefijo = nombre_base_f if renombrar else os.path.splitext(os.path.basename(archivo_input))[0]
 
-    # Imágenes
+    # Descarga imágenes
     img_url = escena.get('image')
     if img_url:
-        print(f"[*] Descargando imágenes ID {escena['id']}...", end=' ', flush=True)
         img_data = requests.get(img_url).content
         ext_img = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
         for suf in ["", "-fanart"]:
-            nom_img = f"{prefijo}{suf}{ext_img}"
-            with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
+            with open(os.path.join(info['directorio'], f"{prefijo}{suf}{ext_img}"), 'wb') as f:
                 f.write(img_data)
-        print("OK.")
+        print(f"[OK] Imágenes ID {escena['id']} guardadas.")
 
     # Renombrar
     if renombrar:
         nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
-        if info['original_full_path'] != nueva_ruta:
-            print(f"[*] Renombrando a: {nombre_base_f}{info['ext_video']}")
-            os.rename(info['original_full_path'], nueva_ruta)
+        os.rename(info['original_full_path'], nueva_ruta)
+        print(f"[OK] Vídeo renombrado.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("archivo")
     parser.add_argument("-i", "--interactive", action="store_true")
     parser.add_argument("-n", "--rename", action="store_true")
+    parser.add_argument("-s", "--site", help="Forzar el nombre del estudio")
     args = parser.parse_args()
-    ejecutar(args.archivo, args.interactive, args.rename)
+    
+    ejecutar(args.archivo, args.interactive, args.rename, args.site)

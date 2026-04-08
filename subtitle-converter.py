@@ -271,8 +271,16 @@ def convert_ass_to_srt(input_file, output_file):
     for i in range(len(subs) - 1):
         if subs[i]["end"] > subs[i + 1]["start"]:
             subs[i]["end"] = subs[i + 1]["start"]
-        if subs[i]["end"] - subs[i]["start"] < 100:
-            subs[i]["end"] = subs[i]["start"] + 100
+        min_duration = 3 * len(subs[i]["text"])
+        if subs[i]["end"] - subs[i]["start"] < min_duration:
+            subs[i]["end"] = subs[i]["start"] + min_duration
+
+    # Enforce minimum for the last subtitle
+    if len(subs) > 0:
+        i = len(subs) - 1
+        min_duration = math.ceil(0.3 * len(subs[i]["text"]))
+        if subs[i]["end"] - subs[i]["start"] < min_duration:
+            subs[i]["end"] = subs[i]["start"] + min_duration
 
     # DURACIÓN MÍNIMA (Criterio 2: 1cs)
     subs = subs[(subs["end"] - subs["start"]) >= 1]

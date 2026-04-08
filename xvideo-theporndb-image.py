@@ -13,10 +13,11 @@ SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto, es_estudio=False):
     if not texto: return ""
-    # Convertimos separadores a espacios para detectar tags como palabras sueltas
+    # Convertimos separadores a espacios
     temp = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     if es_estudio: return " ".join(temp.split()).strip()
 
+    # Tags de limpieza para títulos
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
@@ -37,24 +38,19 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
     estudio_raw = sitio_forzado if sitio_forzado else os.path.basename(os.path.dirname(path_abs))
     estudio_busqueda = limpiar_basura(estudio_raw, es_estudio=True)
     
-    # 2. EXTENSIÓN DE VIDEO Y NOMBRE BASE ORIGINAL
+    # 2. EXTENSIONES
     match_ext_vid = re.search(r'\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
     ext_video = match_ext_vid.group(0) if match_ext_vid else os.path.splitext(nombre_archivo)[1]
-    
-    # raw_base_name es el nombre del archivo SIN la extensión (.mp4)
     raw_base_name = nombre_archivo[:nombre_archivo.rfind(ext_video)]
     
-    # Identificamos etiqueta tipo .q20 para el renombrado
     match_tag = re.search(r'\.([a-z0-9]+)$', raw_base_name, flags=re.IGNORECASE)
     tag_tecnico_api = f" [{match_tag.group(1).upper()}]" if match_tag else ""
 
-    # 3. LIMPIEZA PARA BÚSQUEDA
-    # Quitar el estudio del nombre para la query
+    # 3. LIMPIEZA TÍTULO
     est_clean = estudio_busqueda.replace(" ", "")
     tit_temp = re.sub(re.escape(est_clean), '', raw_base_name, flags=re.IGNORECASE)
     tit_temp = re.sub(re.escape(estudio_busqueda), '', tit_temp, flags=re.IGNORECASE)
     tit_busqueda = limpiar_basura(tit_temp)
-    
     if len(tit_busqueda) < 3: tit_busqueda = limpiar_basura(raw_base_name)
 
     # 4. FECHA
@@ -89,41 +85,58 @@ def realizar_peticion(params):
 def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sitio_forzado=None):
     info = extraer_datos_locales(archivo_input, sitio_forzado)
     print(f"\n[*] ARCHIVO: {info['raw_base_name']}{info['ext_video']}")
-    print(f"[*] BÚSQUEDA: Site='{info['estudio_busqueda']}' | Query='{info['titulo_busqueda']}'")
 
-    # Búsqueda
+    # --- MOTOR DE BÚSQUEDA MULTINIVEL ---
+    print(f"[*] Buscando (Strict): Site='{info['estudio_busqueda']}' | Query='{info['titulo_busqueda']}'...", end=' ', flush=True)
     params = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
     if info['fecha']: params["date"] = info['fecha']
     res = realizar_peticion(params)
-    if not res: res = realizar_peticion({"q": info['titulo_busqueda']})
 
     if not res:
-        print("[!] No se han encontrado resultados.")
+        print("\n[*] Buscando (Semi): Site sin fecha...", end=' ', flush=True)
+        res = realizar_peticion({"site": info['estudio_busqueda'], "q": info['titulo_busqueda']})
+
+    if not res:
+        print("\n[*] Buscando (Global): Sin filtro de sitio...", end=' ', flush=True)
+        res = realizar_peticion({"q": info['titulo_busqueda']})
+
+    # RESCATE MANUAL
+    while not res and interactivo:
+        print("\n" + "!"*30 + " NO HAY RESULTADOS " + "!"*30)
+        manual = input("[?] Introduce título o actriz manualmente (Enter para salir): ").strip()
+        if not manual: break
+        res = realizar_peticion({"q": manual})
+
+    if not res:
+        print("\n[!] No se pudo localizar la escena.")
         return
+
+    print(f"Hecho ({len(res)} resultados).")
 
     # Selección
     if interactivo:
         print(f"\n[?] Opciones:")
-        for i, r in enumerate(res[:10]):
+        print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
+        print("-" * 95)
+        for i, r in enumerate(res[:15]):
             p_ = r.get('performers', [])
             act = p_[0]['name'] if p_ else "N/A"
-            print(f"  {i+1}. [{r['id']}] {r['date']} | {r.get('site',{}).get('name')} | {act} | {r['title']}")
-        sel_raw = input("\nSelecciona (Enter para el 1): ").strip()
-        escena = res[int(sel_raw)-1 if sel_raw else 0]
+            sit = r.get('site',{}).get('name','N/A')
+            print(f"{i+1:<3} | {r['date']:<10} | {sit[:15]:<15} | {act[:18]:<18} | {r['title']}")
+        sel_raw = input("\nSelección (Enter para el 1): ").strip()
+        escena = res[int(sel_raw)-1 if sel_raw and sel_raw.isdigit() else 0]
     else:
         escena = res[0]
 
-    # Determinación del nombre base para los archivos de salida
+    # Nombres finales
     if renombrar:
         est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
         tit_api = escena.get('title', 'N/A')
         perf = escena.get('performers', [])
         actriz = f" - {perf[0]['name']}" if perf else ""
         tag_vr = "_180_3D_LR" if es_vr else ""
-        # Formato: Estudio YYYY-MM-DD Titulo - Actriz [TAG]_180_3D_LR
         nombre_base_final = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {escena['date']} {tit_api}{actriz}{info['tag_tecnico_api']}{tag_vr}")
     else:
-        # Si NO renombras, las imágenes se llaman igual que el video original
         nombre_base_final = info['raw_base_name']
 
     # Imágenes
@@ -133,19 +146,17 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
         img_res = requests.get(img_url, timeout=15)
         ctype = img_res.headers.get('Content-Type', '').lower()
         ext_img = '.png' if 'png' in ctype else '.jpg'
-        
         for suf in ["", "-fanart"]:
             nom_img = f"{nombre_base_final}{suf}{ext_img}"
             with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
                 f.write(img_res.content)
         print("OK.")
 
-    # Renombrar vídeo (Solo si se activó explícitamente -n)
     if renombrar:
         nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_final}{info['ext_video']}")
         if info['original_full_path'] != nueva_ruta:
             os.rename(info['original_full_path'], nueva_ruta)
-            print(f"[OK] Vídeo renombrado a: {nombre_base_final}{info['ext_video']}")
+            print(f"[OK] Renombrado.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

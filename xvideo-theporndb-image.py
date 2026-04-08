@@ -12,7 +12,7 @@ API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto):
-    """Limpia etiquetas para la búsqueda sin tocar la extensión original."""
+    """Limpia etiquetas técnicas para la búsqueda."""
     if not texto: return ""
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
@@ -29,18 +29,17 @@ def extraer_datos_locales(ruta_completa):
     estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
     nombre_archivo = os.path.basename(path_abs)
     
-    # 1. CAPTURA DE EXTENSIÓN COMPLETA Y SUFIJO TÉCNICO
-    # Ejemplo: "Video.q23.mp4" -> ext_completa: ".q23.mp4", sufijo_tecnico: ".q23"
-    match_ext = re.search(r'(\.[a-z0-9]+)?\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
+    # 1. CAPTURA DE EXTENSIÓN Y ETIQUETA [Q20]
+    # Buscamos si hay algo como .q20.mp4
+    match_ext = re.search(r'\.([a-z0-9]+)\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
     
     if match_ext:
-        ext_completa = match_ext.group(0) # .q23.mp4
-        sufijo_tecnico = match_ext.group(1) if match_ext.group(1) else "" # .q23
+        tag_tecnico = f" [{match_ext.group(1).upper()}]" # Ejemplo: [Q20]
+        ext_video = f".{match_ext.group(2)}" # Ejemplo: .mp4
+        nombre_sin_ext = nombre_archivo[:match_ext.start()]
     else:
-        ext_completa = os.path.splitext(nombre_archivo)[1]
-        sufijo_tecnico = ""
-    
-    nombre_sin_ext = nombre_archivo[:nombre_archivo.rfind(ext_completa)]
+        tag_tecnico = ""
+        nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
     
     # 2. DETECCIÓN DE FECHA
     patron_fecha = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
@@ -64,8 +63,8 @@ def extraer_datos_locales(ruta_completa):
         "titulo_busqueda": limpiar_basura(titulo_raw),
         "original_full_path": path_abs,
         "original_base_name": nombre_sin_ext,
-        "extension_completa": ext_completa,
-        "sufijo_tecnico": sufijo_tecnico, # .q23 o .q20 etc.
+        "ext_video": ext_video,
+        "tag_tecnico": tag_tecnico,
         "directorio": os.path.dirname(path_abs)
     }
 
@@ -87,14 +86,14 @@ def buscar_recursivo(info):
 
 def ejecutar(archivo_input, interactivo=False, renombrar=False):
     info = extraer_datos_locales(archivo_input)
-    print(f"\n[*] ARCHIVO: {info['original_base_name']}{info['extension_completa']}")
+    print(f"\n[*] ANALIZANDO: {info['original_base_name']}{info['ext_video']}")
 
     resultados = buscar_recursivo(info)
     if not resultados:
         print("[!] No se encontró nada.")
         return
 
-    # Selección
+    # Selección Interactiva
     if interactivo:
         print(f"\n[?] Opciones ({len(resultados)}):")
         print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
@@ -103,7 +102,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False):
             act = p[0]['name'] if p else "N/A"
             sit = r.get('site', {}).get('name', 'N/A')
             print(f"{i+1:<3} | {r['date']:<10} | {sit[:15]:<15} | {act[:18]:<18} | {r['title']}")
-        sel = int(input("\nSelecciona número (0 para cancelar): ") or 0)
+        sel = int(input("\nSelecciona número (0 para cancelar): ") or 1)
         if sel == 0: return
         escena = resultados[sel-1]
     else:
@@ -111,35 +110,33 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False):
 
     # Datos API
     est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
-    fec_api = escena.get('date', '0000-00-00').replace('-', '.')
+    fecha_api = escena.get('date', '0000-00-00') # Mantiene guiones YYYY-MM-DD
     tit_api = escena.get('title', 'N/A')
     perf = escena.get('performers', [])
     actriz = f" - {perf[0]['name']}" if perf else ""
 
-    nombre_base_limpio = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {fec_api} {tit_api}{actriz}")
-    
-    # 1. GESTIÓN DE IMÁGENES CON DOBLE EXTENSIÓN
+    # Construcción del nombre: Estudio YYYY-MM-DD Titulo - Actriz [TAG]
+    nombre_base_f = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {fecha_api} {tit_api}{actriz}{info['tag_tecnico']}")
+    prefijo = nombre_base_f if renombrar else info['original_base_name']
+
+    # 1. Gestión de Imágenes
     img_url = escena.get('image')
     if img_url:
         print(f"[*] Descargando imágenes...", end=' ', flush=True)
         img_data = requests.get(img_url).content
-        ext_img_final = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
+        ext_img = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
         
-        # El prefijo será el nombre nuevo (si -n) o el original (si no -n)
-        prefijo = nombre_base_limpio if renombrar else info['original_base_name']
-        
-        # El sufijo técnico (.q23) se mantiene siempre para las imágenes
         for suf in ["", "-fanart"]:
-            nom_img = f"{prefijo}{suf}{info['sufijo_tecnico']}{ext_img_final}"
+            nom_img = f"{prefijo}{suf}{ext_img}"
             with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
                 f.write(img_data)
         print("OK.")
 
-    # 2. RENOMBRAR VÍDEO
+    # 2. Renombrar Vídeo
     if renombrar:
-        nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_limpio}{info['extension_completa']}")
+        nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
         if info['original_full_path'] != nueva_ruta:
-            print(f"[*] Renombrando vídeo a: {nombre_base_limpio}{info['extension_completa']}")
+            print(f"[*] Renombrando a: {nombre_base_f}{info['ext_video']}")
             os.rename(info['original_full_path'], nueva_ruta)
 
 if __name__ == "__main__":

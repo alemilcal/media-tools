@@ -14,22 +14,25 @@ SEARCH_URL = "https://api.theporndb.net/scenes"
 def limpiar_basura(texto, es_estudio=False):
     if not texto: return ""
     
-    # Si es el nombre del estudio, solo limpiamos símbolos básicos
+    # 1. Normalizar: convertimos TODOS los separadores a espacios primero
+    # Esto permite que los tags técnicos se detecten correctamente como palabras
+    texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
+    
     if es_estudio:
-        texto = re.sub(r'[\._\-]', ' ', texto)
         return " ".join(texto.split()).strip()
 
-    # Si es título, limpieza agresiva
+    # 2. Diccionario agresivo de tags técnicos (VR y Ripeos)
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
-        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR', 
-        r'\b180x180\b', r'\b3dh\b', r'\b180\b', r'\bsbs\b'
+        r'\bq\d{2}\b', r'\bpart\d\b', 
+        r'\b180x180\b', r'\b3dh\b', r'\b3d\b', r'\blr\b', r'\b180\b', 
+        r'\bsbs\b', r'\bvr\b', r'\bfull\b', r'\braw\b'
     ]
+    
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
     
-    texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
 def extraer_datos_locales(ruta_completa, sitio_forzado=None):
@@ -52,17 +55,17 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
         sufijo_original = ""
         nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
 
-    # 3. LIMPIEZA DE TÍTULO (Quitar nombre del estudio del archivo)
-    # Buscamos el estudio incluso si está pegado (ej: BadoinkVR)
-    estudio_para_quitar = estudio_busqueda.replace(" ", "")
-    titulo_limpio = re.sub(re.escape(estudio_para_quitar), '', nombre_sin_ext, flags=re.IGNORECASE)
-    # También intentamos quitarlo con espacios
-    titulo_limpio = re.sub(re.escape(estudio_busqueda), '', titulo_limpio, flags=re.IGNORECASE)
+    # 3. LIMPIEZA DE TÍTULO (Quitar nombre del estudio y tags técnicos)
+    # Primero quitamos el nombre del estudio si aparece pegado o con espacios
+    estudio_sin_espacios = estudio_busqueda.replace(" ", "")
+    titulo_temp = re.sub(re.escape(estudio_sin_espacios), '', nombre_sin_ext, flags=re.IGNORECASE)
+    titulo_temp = re.sub(re.escape(estudio_busqueda), '', titulo_temp, flags=re.IGNORECASE)
     
-    titulo_final = limpiar_basura(titulo_limpio)
+    # Ahora limpiamos todos los tags técnicos (yoga-temptation-4k... -> yoga temptation)
+    titulo_final = limpiar_basura(titulo_temp)
     
-    # Si el título queda vacío tras limpiar (caso raro), volvemos al original limpio
-    if len(titulo_final) < 2:
+    # Fallback: si la limpieza es excesiva, usamos el nombre original limpio
+    if len(titulo_final) < 3:
         titulo_final = limpiar_basura(nombre_sin_ext)
 
     # 4. FECHA
@@ -88,7 +91,7 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
         "directorio": os.path.dirname(path_abs)
     }
 
-def realizar_busqueda(params):
+def realizar_peticion(params):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
     try:
         r = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12)
@@ -100,23 +103,22 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     print(f"\n[*] ARCHIVO: {info['original_base_name']}")
     print(f"[*] BUSCANDO: Site='{info['estudio_busqueda']}' | Query='{info['titulo_busqueda']}'")
 
-    # Búsqueda Multinivel
+    # 1. Búsqueda con Site + Título
     params = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
     if info['fecha']: params["date"] = info['fecha']
+    resultados = realizar_peticion(params)
     
-    resultados = realizar_busqueda(params)
-    
-    # Si falla, relajar sin sitio (pero mantener sitio en el prompt interactivo)
+    # 2. Si falla, reintento global (solo Título)
     if not resultados:
-        print("[*] Reintentando búsqueda global...")
-        resultados = realizar_busqueda({"q": info['titulo_busqueda']})
+        print("[*] Sin resultados con filtro de estudio. Probando búsqueda global...")
+        resultados = realizar_peticion({"q": info['titulo_busqueda']})
 
-    # Rescate Manual
+    # 3. Rescate Manual (Si nada funciona y es interactivo)
     while not resultados and interactivo:
-        print("\n" + "!"*30 + " NO HAY RESULTADOS " + "!"*30)
-        manual = input("[?] Escribe el título o actriz manualmente (o Enter para salir): ").strip()
+        print("\n" + "!"*20 + " NO HAY RESULTADOS AUTOMÁTICOS " + "!"*20)
+        manual = input("[?] Escribe título o actriz (o Enter para salir): ").strip()
         if not manual: break
-        resultados = realizar_busqueda({"q": manual})
+        resultados = realizar_peticion({"q": manual})
 
     if not resultados:
         print("[!] No se encontró nada.")
@@ -126,7 +128,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     if interactivo:
         print(f"\n[?] Opciones:")
         print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
-        print("-" * 90)
+        print("-" * 95)
         for i, r in enumerate(resultados[:15]):
             p_ = r.get('performers', [])
             act = p_[0]['name'] if p_ else "N/A"
@@ -138,7 +140,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     else:
         escena = resultados[0]
 
-    # Procesamiento final (Igual que antes)
+    # Procesamiento de nombre final
     est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
     fec_api = escena.get('date', '0000-00-00')
     tit_api = escena.get('title', 'N/A')
@@ -153,6 +155,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
         nombre_base_f = f"{info['original_base_name']}{tag_vr}"
         sufijo_img = info['sufijo_original']
 
+    # Descarga imágenes
     img_url = escena.get('image')
     if img_url:
         print(f"[*] Descargando imágenes...", end=' ', flush=True)
@@ -167,7 +170,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     if renombrar:
         nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
         os.rename(info['original_full_path'], nueva_ruta)
-        print(f"[OK] Renombrado.")
+        print(f"[OK] Renombrado a: {nombre_base_f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

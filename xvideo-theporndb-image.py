@@ -12,8 +12,14 @@ API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto):
-    """Limpia etiquetas técnicas para la búsqueda."""
+    """Elimina etiquetas técnicas, calidades y corchetes para la búsqueda."""
     if not texto: return ""
+    
+    # 1. Eliminar TODO lo que esté dentro de corchetes [] o paréntesis ()
+    # Esto quita [VRSpy], [Oculus], [4K], etc.
+    texto = re.sub(r'[\[\(\].*?[\]\)]', '', texto)
+    
+    # 2. Etiquetas de calidad y técnica comunes
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
@@ -21,7 +27,9 @@ def limpiar_basura(texto):
     ]
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
-    texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
+    
+    # 3. Limpiar símbolos y dejar solo palabras
+    texto = re.sub(r'[\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
 def extraer_datos_locales(ruta_completa):
@@ -29,40 +37,34 @@ def extraer_datos_locales(ruta_completa):
     estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
     nombre_archivo = os.path.basename(path_abs)
     
-    # 1. CAPTURA DE EXTENSIÓN Y ETIQUETA [Q20]
-    # Buscamos si hay algo como .q20.mp4
+    # Captura de extensión y etiqueta técnica final (ej: .q20.mp4)
     match_ext = re.search(r'\.([a-z0-9]+)\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
-    
     if match_ext:
-        tag_tecnico = f" [{match_ext.group(1).upper()}]" # Ejemplo: [Q20]
-        ext_video = f".{match_ext.group(2)}" # Ejemplo: .mp4
+        tag_tecnico = f" [{match_ext.group(1).upper()}]"
+        ext_video = f".{match_ext.group(2)}"
         nombre_sin_ext = nombre_archivo[:match_ext.start()]
     else:
         tag_tecnico = ""
         nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
     
-    # 2. DETECCIÓN DE FECHA
+    # Detección de fecha
     patron_fecha = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
     match_f = re.search(patron_fecha, nombre_sin_ext)
     
     fecha_norm = None
-    titulo_raw = nombre_sin_ext
-    
     if match_f:
         g = match_f.groups()
         if g[0]: fecha_norm = f"{g[0]}-{g[1].zfill(2)}-{g[2].zfill(2)}"
         else:
             año = "20"+g[5] if len(g[5])==2 else g[5]
             fecha_norm = f"{año}-{g[4].zfill(2)}-{g[3].zfill(2)}"
-        titulo_raw = nombre_sin_ext[match_f.end():].strip() or nombre_sin_ext[:match_f.start()].strip()
 
     return {
         "estudio_local": estudio_carpeta,
         "estudio_busqueda": limpiar_basura(estudio_carpeta),
         "fecha": fecha_norm,
-        "titulo_busqueda": limpiar_basura(titulo_raw),
+        "titulo_sucio": nombre_sin_ext,
         "original_full_path": path_abs,
-        "original_base_name": nombre_sin_ext,
         "ext_video": ext_video,
         "tag_tecnico": tag_tecnico,
         "directorio": os.path.dirname(path_abs)
@@ -75,64 +77,84 @@ def realizar_peticion(params):
         return resp.json().get('data', [])
     except: return []
 
-def buscar_recursivo(info):
-    p = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
+def buscar_inteligente(info):
+    """Prueba varias combinaciones de búsqueda para archivos difíciles."""
+    estudio = info['estudio_busqueda']
+    # Limpiamos el título de corchetes y tags
+    titulo_limpio = limpiar_basura(info['titulo_sucio'])
+    
+    # 1. Búsqueda exacta (Sitio + Título + Fecha)
+    print(f"[*] Intentando búsqueda estricta: '{titulo_limpio}' en '{estudio}'...")
+    p = {"site": estudio, "q": titulo_limpio}
     if info['fecha']: p["date"] = info['fecha']
     res = realizar_peticion(p)
     if res: return res
-    res = realizar_peticion({"site": info['estudio_busqueda'], "q": info['titulo_busqueda']})
+
+    # 2. Si hay un guion " - ", intentar solo con la parte derecha (título real)
+    if " - " in titulo_limpio:
+        partes = titulo_limpio.split(" - ")
+        solo_titulo = partes[-1].strip()
+        print(f"[*] Intentando solo con título: '{solo_titulo}'...")
+        res = realizar_peticion({"site": estudio, "q": solo_titulo})
+        if res: return res
+
+    # 3. Búsqueda global sin estudio (por si el nombre de carpeta no es exacto)
+    print(f"[*] Intentando búsqueda global por título...")
+    res = realizar_peticion({"q": titulo_limpio})
     if res: return res
-    return realizar_peticion({"q": info['titulo_busqueda']})
+
+    return []
 
 def ejecutar(archivo_input, interactivo=False, renombrar=False):
     info = extraer_datos_locales(archivo_input)
-    print(f"\n[*] ANALIZANDO: {info['original_base_name']}{info['ext_video']}")
+    print(f"\n[*] ANALIZANDO: {archivo_input}")
 
-    resultados = buscar_recursivo(info)
+    resultados = buscar_inteligente(info)
+    
     if not resultados:
-        print("[!] No se encontró nada.")
-        return
+        print("[!] No se encontró nada. Prueba con el modo interactivo (-i) para búsqueda manual.")
+        if interactivo:
+            manual = input("[?] Introduce búsqueda manual: ")
+            if manual: resultados = realizar_peticion({"q": manual})
+        if not resultados: return
 
-    # Selección Interactiva
+    # Selección
     if interactivo:
-        print(f"\n[?] Opciones ({len(resultados)}):")
-        print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
+        print(f"\n[?] Opciones encontradas:")
         for i, r in enumerate(resultados[:10]):
             p = r.get('performers', [])
             act = p[0]['name'] if p else "N/A"
-            sit = r.get('site', {}).get('name', 'N/A')
-            print(f"{i+1:<3} | {r['date']:<10} | {sit[:15]:<15} | {act[:18]:<18} | {r['title']}")
+            print(f"  {i+1}. [{r['id']}] {r['date']} | {act} | {r['title']}")
         sel = int(input("\nSelecciona número (0 para cancelar): ") or 1)
         if sel == 0: return
         escena = resultados[sel-1]
     else:
         escena = resultados[0]
 
-    # Datos API
+    # Datos finales
     est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
-    fecha_api = escena.get('date', '0000-00-00') # Mantiene guiones YYYY-MM-DD
+    fecha_api = escena.get('date', '0000-00-00')
     tit_api = escena.get('title', 'N/A')
     perf = escena.get('performers', [])
     actriz = f" - {perf[0]['name']}" if perf else ""
 
-    # Construcción del nombre: Estudio YYYY-MM-DD Titulo - Actriz [TAG]
+    # Formato: Estudio YYYY-MM-DD Titulo - Actriz [TAG]
     nombre_base_f = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {fecha_api} {tit_api}{actriz}{info['tag_tecnico']}")
-    prefijo = nombre_base_f if renombrar else info['original_base_name']
+    prefijo = nombre_base_f if renombrar else os.path.splitext(os.path.basename(archivo_input))[0]
 
-    # 1. Gestión de Imágenes
+    # Imágenes
     img_url = escena.get('image')
     if img_url:
-        print(f"[*] Descargando imágenes...", end=' ', flush=True)
+        print(f"[*] Descargando imágenes ID {escena['id']}...", end=' ', flush=True)
         img_data = requests.get(img_url).content
         ext_img = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
-        
         for suf in ["", "-fanart"]:
             nom_img = f"{prefijo}{suf}{ext_img}"
             with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
                 f.write(img_data)
         print("OK.")
 
-    # 2. Renombrar Vídeo
+    # Renombrar
     if renombrar:
         nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
         if info['original_full_path'] != nueva_ruta:

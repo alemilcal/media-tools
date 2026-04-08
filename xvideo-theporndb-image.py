@@ -13,11 +13,11 @@ SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto, es_estudio=False):
     if not texto: return ""
-    # Normalizar separadores
+    # Normalizar separadores a espacios
     temp = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     if es_estudio: return " ".join(temp.split()).strip()
 
-    # Tags técnicos
+    # Tags técnicos de limpieza
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
@@ -46,39 +46,39 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
     match_tag = re.search(r'\.([a-z0-9]+)$', raw_base_name, flags=re.IGNORECASE)
     tag_tecnico_api = f" [{match_tag.group(1).upper()}]" if match_tag else ""
 
-    # 3. FECHA (Prioridad absoluta a YYYYMMDD de 8 dígitos)
+    # 3. FECHA (Buscamos la cadena original para borrarla luego)
     fecha_norm = None
-    pos_fecha = None
+    cadena_fecha_original = ""
     
-    # Intentar YYYYMMDD (8 dígitos que empiecen por 19 o 20)
+    # Formato YYYYMMDD (8 dígitos)
     match_f8 = re.search(r'\b((19|20)\d{2})(\d{2})(\d{2})\b', raw_base_name)
     if match_f8:
         fecha_norm = f"{match_f8.group(1)}-{match_f8.group(3)}-{match_f8.group(4)}"
-        pos_fecha = match_f8.span()
+        cadena_fecha_original = match_f8.group(0)
     else:
-        # Intentar formatos con separadores
+        # Formatos con separadores
         patron_f = r'(\d{4})[\.\-_\s](\d{2})[\.\-_\s](\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
         match_f = re.search(patron_f, raw_base_name)
         if match_f:
-            pos_fecha = match_f.span()
+            cadena_fecha_original = match_f.group(0)
             g = match_f.groups()
             if g[0]: fecha_norm = f"{g[0]}-{g[1]}-{g[2]}"
             else:
                 año = "20"+g[5] if len(g[5])==2 else g[5]
                 fecha_norm = f"{año}-{g[4]}-{g[3]}"
 
-    # 4. LIMPIEZA TÍTULO
-    # Quitamos el estudio
+    # 4. LIMPIEZA TÍTULO (Orden crítico para evitar desplazamiento de índices)
     tit_temp = raw_base_name
-    for s in [est_busqueda, est_busqueda.replace(" ", "")]:
-        tit_temp = re.sub(re.escape(s), '', tit_temp, flags=re.IGNORECASE)
     
-    # Quitamos la fecha usando su posición exacta para no borrar otros números
-    if pos_fecha:
-        tit_temp = tit_temp[:pos_fecha[0]] + " " + tit_temp[pos_fecha[1]:]
+    # A. Borramos la fecha literal primero
+    if cadena_fecha_original:
+        tit_temp = tit_temp.replace(cadena_fecha_original, ' ')
+    
+    # B. Borramos el estudio (con y sin espacios)
+    for s in [est_busqueda, est_busqueda.replace(" ", "")]:
+        if s: tit_temp = re.sub(re.escape(s), ' ', tit_temp, flags=re.IGNORECASE)
 
     tit_busqueda = limpiar_basura(tit_temp)
-    # Si el título queda muy corto, usamos el original sin extensión
     if len(tit_busqueda) < 3: tit_busqueda = limpiar_basura(raw_base_name)
 
     return {
@@ -102,27 +102,29 @@ def realizar_peticion(params):
 def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sitio_forzado=None):
     info = extraer_datos_locales(archivo_input, sitio_forzado)
     
-    # --- SALIDA VERBOSE ---
-    print(f"\n" + "="*60)
-    print(f"[*] ARCHIVO: {info['raw_base_name']}{info['ext_video']}")
-    print(f"[*] ESTUDIO DETECTADO: {info['est_busqueda']}")
-    print(f"[*] FECHA DETECTADA:   {info['fecha'] if info['fecha'] else 'No encontrada'}")
-    print(f"[*] TÍTULO BÚSQUEDA:   {info['tit_busqueda']}")
-    print("="*60)
+    # --- VERBOSE OUTPUT ---
+    print(f"\n" + "╔" + "═"*68 + "╗")
+    print(f"║ ARCHIVO:  {info['raw_base_name'][:58]:<58} ║")
+    print(f"║ ESTUDIO:  {info['est_busqueda'][:58]:<58} ║")
+    print(f"║ FECHA:    {(info['fecha'] if info['fecha'] else 'NO DETECTADA'):<58} ║")
+    print(f"║ QUERY:    {info['tit_busqueda'][:58]:<58} ║")
+    print(f"╚" + "═"*68 + "╝")
 
-    # Búsqueda
+    # Búsqueda Nivel 1
     params = {"site": info['est_busqueda'], "q": info['tit_busqueda']}
     if info['fecha']: params["date"] = info['fecha']
     
-    print(f"[*] Buscando escena...", end=' ', flush=True)
+    print(f"[*] Buscando con filtros...", end=' ', flush=True)
     res = realizar_peticion(params)
 
+    # Nivel 2: Sin fecha
     if not res:
-        print("Sin éxito. Reintentando sin fecha...", end=' ', flush=True)
+        print("Sin éxito. Intentando sin fecha...", end=' ', flush=True)
         res = realizar_peticion({"site": info['est_busqueda'], "q": info['tit_busqueda']})
 
+    # Nivel 3: Global
     if not res:
-        print("Sin éxito. Reintentando búsqueda global...", end=' ', flush=True)
+        print("Sin éxito. Intentando búsqueda global...", end=' ', flush=True)
         res = realizar_peticion({"q": info['tit_busqueda']})
 
     # Rescate Manual
@@ -136,13 +138,13 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
         print("\n[!] No se encontró nada.")
         return
 
-    print(f"Hecho ({len(res)} resultados).")
+    print(f"OK! ({len(res)} resultados).")
 
     # Selección
     if interactivo:
         print(f"\n[?] Opciones encontradas:")
         print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
-        print("-" * 95)
+        print("-" * 75)
         for i, r in enumerate(res[:15]):
             p_ = r.get('performers', [])
             act = p_[0]['name'] if p_ else "N/A"
@@ -153,7 +155,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     else:
         escena = res[0]
 
-    # Procesamiento final
+    # Nombre final
     est_api = escena.get('site', {}).get('name', info['est_busqueda'])
     tit_api = escena.get('title', 'N/A')
     perf = escena.get('performers', [])
@@ -168,7 +170,7 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     # Imágenes
     img_url = escena.get('image')
     if img_url:
-        print(f"[*] Descargando imágenes...", end=' ', flush=True)
+        print(f"[*] Descargando pósters...", end=' ', flush=True)
         img_res = requests.get(img_url, timeout=15)
         ext_img = '.png' if 'png' in img_res.headers.get('Content-Type', '').lower() else '.jpg'
         for suf in ["", "-fanart"]:

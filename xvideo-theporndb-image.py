@@ -11,131 +11,159 @@ import re
 API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
-def limpiar_texto(texto):
-    """Limpia etiquetas técnicas y normaliza para comparar o buscar."""
+def limpiar_basura(texto, es_estudio=False):
     if not texto: return ""
-    tags = [r'\b\d{3,4}p\b', r'\b\d[kK]\b', r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b']
+    # Convertimos separadores a espacios
+    temp = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
+    if es_estudio: return " ".join(temp.split()).strip()
+
+    # Tags de limpieza para títulos
+    tags = [
+        r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
+        r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
+        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR', 
+        r'\b180x180\b', r'\b3dh\b', r'\b3d\b', r'\blr\b', r'\b180\b', 
+        r'\bsbs\b', r'\bvr\b', r'\bfull\b', r'\braw\b'
+    ]
     for tag in tags:
-        texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
-    texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
-    return " ".join(texto.split()).strip()
-
-def normalizar_para_comparar(texto):
-    """Elimina todo excepto letras y números para comparar estudios estrictamente."""
-    return re.sub(r'[^a-zA-Z0-9]', '', texto).lower()
-
-def extraer_datos_locales(ruta_completa):
-    path_abs = os.path.abspath(ruta_completa)
-    estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
-    nombre_archivo = os.path.basename(path_abs)
-    nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
+        temp = re.sub(tag, '', temp, flags=re.IGNORECASE)
     
-    patron_fecha = r'(\d{4}|\d{2})[\._\-\s](\d{2})[\._\-\s](\d{2}|\d{4})'
-    match = re.search(patron_fecha, nombre_sin_ext)
-    fecha_norm = None
-    titulo_raw = nombre_sin_ext
+    return " ".join(temp.split()).strip()
 
-    if match:
-        g1, g2, g3 = match.groups()
-        if len(g1) == 4: fecha_norm = f"{g1}-{g2.zfill(2)}-{g3.zfill(2)}"
+def extraer_datos_locales(ruta_completa, sitio_forzado=None):
+    path_abs = os.path.abspath(ruta_completa)
+    nombre_archivo = os.path.basename(path_abs)
+    
+    # 1. ESTUDIO
+    estudio_raw = sitio_forzado if sitio_forzado else os.path.basename(os.path.dirname(path_abs))
+    estudio_busqueda = limpiar_basura(estudio_raw, es_estudio=True)
+    
+    # 2. EXTENSIONES
+    match_ext_vid = re.search(r'\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
+    ext_video = match_ext_vid.group(0) if match_ext_vid else os.path.splitext(nombre_archivo)[1]
+    raw_base_name = nombre_archivo[:nombre_archivo.rfind(ext_video)]
+    
+    match_tag = re.search(r'\.([a-z0-9]+)$', raw_base_name, flags=re.IGNORECASE)
+    tag_tecnico_api = f" [{match_tag.group(1).upper()}]" if match_tag else ""
+
+    # 3. LIMPIEZA TÍTULO
+    est_clean = estudio_busqueda.replace(" ", "")
+    tit_temp = re.sub(re.escape(est_clean), '', raw_base_name, flags=re.IGNORECASE)
+    tit_temp = re.sub(re.escape(estudio_busqueda), '', tit_temp, flags=re.IGNORECASE)
+    tit_busqueda = limpiar_basura(tit_temp)
+    if len(tit_busqueda) < 3: tit_busqueda = limpiar_basura(raw_base_name)
+
+    # 4. FECHA
+    patron_f = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
+    match_f = re.search(patron_f, raw_base_name)
+    fecha_norm = None
+    if match_f:
+        g = match_f.groups()
+        if g[0]: fecha_norm = f"{g[0]}-{g[1].zfill(2)}-{g[2].zfill(2)}"
         else:
-            año = "20"+g3 if len(g3)==2 else g3
-            fecha_norm = f"{año}-{g2.zfill(2)}-{g1.zfill(2)}"
-        titulo_raw = nombre_sin_ext[match.end():] or nombre_sin_ext
+            año = "20"+g[5] if len(g[5])==2 else g[5]
+            fecha_norm = f"{año}-{g[4].zfill(2)}-{g[3].zfill(2)}"
 
     return {
-        "estudio_local": estudio_carpeta,
-        "estudio_busqueda": limpiar_texto(estudio_carpeta),
+        "estudio_busqueda": estudio_busqueda,
         "fecha": fecha_norm,
-        "titulo_busqueda": limpiar_texto(titulo_raw),
+        "titulo_busqueda": tit_busqueda,
+        "raw_base_name": raw_base_name,
         "original_full_path": path_abs,
-        "original_base_name": nombre_sin_ext,
-        "extension_video": ext_video,
+        "ext_video": ext_video,
+        "tag_tecnico_api": tag_tecnico_api,
         "directorio": os.path.dirname(path_abs)
     }
 
-def buscar_y_procesar(archivo_input, interactivo=False, renombrar=False):
-    info = extraer_datos_locales(archivo_input)
+def realizar_peticion(params):
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
-    
-    print(f"\n[*] ARCHIVO: {info['original_base_name']}")
-    
+    try:
+        r = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12)
+        return r.json().get('data', [])
+    except: return []
+
+def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sitio_forzado=None):
+    info = extraer_datos_locales(archivo_input, sitio_forzado)
+    print(f"\n[*] ARCHIVO: {info['raw_base_name']}{info['ext_video']}")
+
+    # --- MOTOR DE BÚSQUEDA MULTINIVEL ---
+    print(f"[*] Buscando (Strict): Site='{info['estudio_busqueda']}' | Query='{info['titulo_busqueda']}'...", end=' ', flush=True)
     params = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
     if info['fecha']: params["date"] = info['fecha']
+    res = realizar_peticion(params)
 
-    try:
-        res_raw = requests.get(SEARCH_URL, headers=headers, params=params, timeout=10).json().get('data', [])
-        
-        # Filtrado Estricto de Estudio
-        estudio_local_norm = normalizar_para_comparar(info['estudio_busqueda'])
-        resultados_validos = []
+    if not res:
+        print("\n[*] Buscando (Semi): Site sin fecha...", end=' ', flush=True)
+        res = realizar_peticion({"site": info['estudio_busqueda'], "q": info['titulo_busqueda']})
 
-        for escena in res_raw:
-            estudio_api = escena.get('site', {}).get('name', '')
-            estudio_api_norm = normalizar_para_comparar(estudio_api)
-            if estudio_local_norm in estudio_api_norm or estudio_api_norm in estudio_local_norm:
-                resultados_validos.append(escena)
+    if not res:
+        print("\n[*] Buscando (Global): Sin filtro de sitio...", end=' ', flush=True)
+        res = realizar_peticion({"q": info['titulo_busqueda']})
 
-        if not resultados_validos:
-            print(f"[!] ERROR: No hay coincidencias para el estudio '{info['estudio_local']}'.")
-            return
+    # RESCATE MANUAL
+    while not res and interactivo:
+        print("\n" + "!"*30 + " NO HAY RESULTADOS " + "!"*30)
+        manual = input("[?] Introduce título o actriz manualmente (Enter para salir): ").strip()
+        if not manual: break
+        res = realizar_peticion({"q": manual})
 
-        # SELECCIÓN INTERACTIVA (Con información de Actriz)
-        if interactivo:
-            print(f"\n[?] Opciones en '{info['estudio_local']}':")
-            print(f"{'#':<3} | {'ID':<7} | {'FECHA':<10} | {'ACTRIZ PRINCIPAL':<20} | {'TÍTULO'}")
-            print("-" * 80)
-            for i, r in enumerate(resultados_validos[:10]):
-                actrices = r.get('performers', [])
-                actriz_p = actrices[0]['name'] if actrices else "N/A"
-                print(f"{i+1:<3} | {r['id']:<7} | {r['date']:<10} | {actriz_p[:20]:<20} | {r['title']}")
-            
-            try:
-                sel = int(input("\nSelecciona número (0 para cancelar): ") or 0)
-                if sel == 0: return
-                escena = resultados_validos[sel-1]
-            except: return
-        else:
-            escena = resultados_validos[0]
+    if not res:
+        print("\n[!] No se pudo localizar la escena.")
+        return
 
-        # Datos para el guardado/renombrado
-        estudio_api_f = escena.get('site', {}).get('name', info['estudio_busqueda'])
-        fecha_api = escena.get('date', '0000-00-00').replace('-', '.')
-        titulo_api = escena.get('title', 'N/A')
-        actrices_final = escena.get('performers', [])
-        actriz_str = f" - {actrices_final[0]['name']}" if actrices_final else ""
+    print(f"Hecho ({len(res)} resultados).")
 
-        nombre_final_base = re.sub(r'[\\/:*?"<>|]', '', f"{estudio_api_f} {fecha_api} {titulo_api}{actriz_str}")
-        prefijo = nombre_final_base if renombrar else info['original_base_name']
+    # Selección
+    if interactivo:
+        print(f"\n[?] Opciones:")
+        print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<18} | {'TÍTULO'}")
+        print("-" * 95)
+        for i, r in enumerate(res[:15]):
+            p_ = r.get('performers', [])
+            act = p_[0]['name'] if p_ else "N/A"
+            sit = r.get('site',{}).get('name','N/A')
+            print(f"{i+1:<3} | {r['date']:<10} | {sit[:15]:<15} | {act[:18]:<18} | {r['title']}")
+        sel_raw = input("\nSelección (Enter para el 1): ").strip()
+        escena = res[int(sel_raw)-1 if sel_raw and sel_raw.isdigit() else 0]
+    else:
+        escena = res[0]
 
-        # Descarga de Imágenes
-        img_url = escena.get('image')
-        if img_url:
-            print(f"\n[+] ID: {escena['id']} | Descargando imágenes...", end=' ', flush=True)
-            img_data = requests.get(img_url).content
-            _, ext_img = os.path.splitext(img_url.split('?')[0])
-            ext_img = ext_img if ext_img else ".jpg"
-            
-            for sufijo in ["", "-fanart"]:
-                ruta = os.path.join(info['directorio'], f"{prefijo}{sufijo}{ext_img}")
-                with open(ruta, 'wb') as f:
-                    f.write(img_data)
-            print("OK.")
+    # Nombres finales
+    if renombrar:
+        est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
+        tit_api = escena.get('title', 'N/A')
+        perf = escena.get('performers', [])
+        actriz = f" - {perf[0]['name']}" if perf else ""
+        tag_vr = "_180_3D_LR" if es_vr else ""
+        nombre_base_final = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {escena['date']} {tit_api}{actriz}{info['tag_tecnico_api']}{tag_vr}")
+    else:
+        nombre_base_final = info['raw_base_name']
 
-        # Renombrado de Vídeo
-        if renombrar:
-            nueva_ruta = os.path.join(info['directorio'], f"{nombre_final_base}{info['extension_video']}")
-            if info['original_full_path'] != nueva_ruta:
-                print(f"[*] Renombrando vídeo a: {nombre_final_base}{info['extension_video']}")
-                os.rename(info['original_full_path'], nueva_ruta)
+    # Imágenes
+    img_url = escena.get('image')
+    if img_url:
+        print(f"[*] Descargando imágenes...", end=' ', flush=True)
+        img_res = requests.get(img_url, timeout=15)
+        ctype = img_res.headers.get('Content-Type', '').lower()
+        ext_img = '.png' if 'png' in ctype else '.jpg'
+        for suf in ["", "-fanart"]:
+            nom_img = f"{nombre_base_final}{suf}{ext_img}"
+            with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
+                f.write(img_res.content)
+        print("OK.")
 
-    except Exception as e:
-        print(f"[!] Error: {e}")
+    if renombrar:
+        nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_final}{info['ext_video']}")
+        if info['original_full_path'] != nueva_ruta:
+            os.rename(info['original_full_path'], nueva_ruta)
+            print(f"[OK] Renombrado.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("archivo")
     parser.add_argument("-i", "--interactive", action="store_true")
     parser.add_argument("-n", "--rename", action="store_true")
+    parser.add_argument("-v", "--vr", action="store_true")
+    parser.add_argument("-s", "--site", help="Forzar estudio")
     args = parser.parse_args()
-    buscar_y_procesar(args.archivo, args.interactive, args.rename)
+    ejecutar(args.archivo, args.interactive, args.rename, args.vr, args.site)

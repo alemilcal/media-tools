@@ -123,7 +123,7 @@ def convertVideo():
         audioSampling = "-ar 22050"      if args.l else ""
         vfoptions  = f"scale='{videoWidth}:-2'"
         if es_hdr:
-            vfoptions += f"zscale=t=linear:npl=100,tonemap=tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709"
+            vfoptions += f",zscale=t=linear:npl=100,tonemap=tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709"
             print('HDR detected in input file (HDR MODE activated)')
         else:
             print('HDR not detected in input file (SDR MODE activated)')

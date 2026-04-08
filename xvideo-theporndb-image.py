@@ -12,7 +12,7 @@ API_KEY = "Q5i9yCmsFJ41wbXX0zwEECE6y8IrCm18NQeRTgDP7240b503"
 SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto):
-    """Elimina etiquetas técnicas y limpia el nombre."""
+    """Limpia etiquetas para la búsqueda en la API sin alterar la extensión original."""
     if not texto: return ""
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
@@ -24,29 +24,32 @@ def limpiar_basura(texto):
     texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
-def normalizar_para_comparar(texto):
-    return re.sub(r'[^a-zA-Z0-9]', '', texto).lower()
-
 def extraer_datos_locales(ruta_completa):
     path_abs = os.path.abspath(ruta_completa)
     estudio_carpeta = os.path.basename(os.path.dirname(path_abs))
     nombre_archivo = os.path.basename(path_abs)
-    nombre_sin_ext = re.sub(r'\.(mp4|mkv|avi|wmv|mov|flv)$', '', nombre_archivo, flags=re.IGNORECASE)
     
+    # 1. Capturar extensión completa (incluyendo dobles extensiones como .q20.mp4)
+    # Busca patrones como .q20.mp4, .1080p.mkv o simplemente .mp4
+    match_ext = re.search(r'(\.[a-z0-9]+)?\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
+    ext_completa = match_ext.group(0) if match_ext else os.path.splitext(nombre_archivo)[1]
+    
+    nombre_sin_ext = nombre_archivo[:nombre_archivo.rfind(ext_completa)]
+    
+    # 2. Regex de fecha
     patron_fecha = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
-    match = re.search(patron_fecha, nombre_sin_ext)
+    match_f = re.search(patron_fecha, nombre_sin_ext)
     
     fecha_norm = None
     titulo_raw = nombre_sin_ext
     
-    if match:
-        grupos = match.groups()
-        if grupos[0]: # Formato YYYY MM DD
-            fecha_norm = f"{grupos[0]}-{grupos[1].zfill(2)}-{grupos[2].zfill(2)}"
-        else: # Formato DD MM YYYY
-            año = "20"+grupos[5] if len(grupos[5])==2 else grupos[5]
-            fecha_norm = f"{año}-{grupos[4].zfill(2)}-{grupos[3].zfill(2)}"
-        titulo_raw = nombre_sin_ext[match.end():].strip() or nombre_sin_ext[:match.start()].strip()
+    if match_f:
+        g = match_f.groups()
+        if g[0]: fecha_norm = f"{g[0]}-{g[1].zfill(2)}-{g[2].zfill(2)}"
+        else:
+            año = "20"+g[5] if len(g[5])==2 else g[5]
+            fecha_norm = f"{año}-{g[4].zfill(2)}-{g[3].zfill(2)}"
+        titulo_raw = nombre_sin_ext[match_f.end():].strip() or nombre_sin_ext[:match_f.start()].strip()
 
     return {
         "estudio_local": estudio_carpeta,
@@ -55,7 +58,7 @@ def extraer_datos_locales(ruta_completa):
         "titulo_busqueda": limpiar_basura(titulo_raw),
         "original_full_path": path_abs,
         "original_base_name": nombre_sin_ext,
-        "extension_video": os.path.splitext(nombre_archivo)[1],
+        "extension_completa": ext_completa,
         "directorio": os.path.dirname(path_abs)
     }
 
@@ -64,115 +67,84 @@ def realizar_peticion(params):
     try:
         resp = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12)
         return resp.json().get('data', [])
-    except:
-        return []
+    except: return []
 
 def buscar_recursivo(info, query_manual=None):
-    """Estrategia de búsqueda por niveles de agresividad."""
-    # Si el usuario introduce una búsqueda manual
-    if query_manual:
-        print(f"[*] Buscando manualmente: '{query_manual}'...")
-        return realizar_peticion({"q": query_manual})
-
-    # Nivel 1: Estudio + Título + Fecha
-    print("[*] Nivel 1: Búsqueda estricta...", end=' ', flush=True)
+    if query_manual: return realizar_peticion({"q": query_manual})
+    
+    # Intento 1: Estudio + Título + Fecha
     p = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
     if info['fecha']: p["date"] = info['fecha']
     res = realizar_peticion(p)
     if res: return res
 
-    # Nivel 2: Estudio + Título (sin fecha)
-    print("\n[*] Nivel 2: Sin fecha...", end=' ', flush=True)
+    # Intento 2: Sin fecha
     res = realizar_peticion({"site": info['estudio_busqueda'], "q": info['titulo_busqueda']})
     if res: return res
 
-    # Nivel 3: Solo Título (Fuzzy global)
-    print("\n[*] Nivel 3: Global por título...", end=' ', flush=True)
-    res = realizar_peticion({"q": info['titulo_busqueda']})
-    if res: return res
-
-    # Nivel 4: Fragmentar título (primeras 3 palabras)
-    palabras = info['titulo_busqueda'].split()
-    if len(palabras) > 2:
-        fragmento = " ".join(palabras[:3])
-        print(f"\n[*] Nivel 4: Fragmento '{fragmento}'...", end=' ', flush=True)
-        res = realizar_peticion({"q": fragmento})
-        if res: return res
-
-    return []
+    # Intento 3: Global
+    return realizar_peticion({"q": info['titulo_busqueda']})
 
 def ejecutar(archivo_input, interactivo=False, renombrar=False):
     info = extraer_datos_locales(archivo_input)
-    print(f"\n[*] ANALIZANDO: {info['original_base_name']}")
+    print(f"[*] PROCESANDO: {info['original_base_name']}{info['extension_completa']}")
     
     resultados = buscar_recursivo(info)
     
-    # BUCLE DE RESCATE (Solo si es interactivo y no hay resultados)
     while not resultados and interactivo:
-        print("\n[!] No se encontró nada automáticamente.")
-        nuevo_termino = input("[?] Introduce término de búsqueda manual (o Enter para salir): ").strip()
-        if not nuevo_termino: break
-        resultados = buscar_recursivo(info, query_manual=nuevo_termino)
+        nuevo = input("[?] No hay resultados. Búsqueda manual: ").strip()
+        if not nuevo: break
+        resultados = buscar_recursivo(info, query_manual=nuevo)
 
-    if not resultados:
-        print("\n[!] Fin de búsqueda sin resultados.")
-        return
-
-    # Filtrar por estudio si no es búsqueda manual y no estamos en modo relax total
-    local_std_norm = normalizar_para_comparar(info['estudio_busqueda'])
-    validos = []
-    for r in resultados:
-        api_std_norm = normalizar_para_comparar(r.get('site', {}).get('name', ''))
-        # Aceptamos si el estudio coincide O si el usuario está eligiendo manualmente
-        if local_std_norm in api_std_norm or api_std_norm in local_std_norm or interactivo:
-            validos.append(r)
-
-    if not validos:
-        print("[!] Los resultados encontrados no coinciden con el estudio local.")
-        return
+    if not resultados: return
 
     # Selección
     if interactivo:
-        print(f"\n[?] Opciones ({len(validos)}):")
+        print(f"\n[?] Opciones:")
         print(f"{'#':<3} | {'FECHA':<10} | {'SITIO':<15} | {'ACTRIZ':<15} | {'TÍTULO'}")
-        print("-" * 90)
-        for i, r in enumerate(validos[:15]):
-            perfs = r.get('performers', [])
-            actriz = perfs[0]['name'] if perfs else "N/A"
-            sitio = r.get('site', {}).get('name', 'N/A')
-            print(f"{i+1:<3} | {r['date']:<10} | {sitio[:15]:<15} | {actriz[:15]:<15} | {r['title']}")
-        
-        sel = int(input("\nSelecciona número (0 para cancelar): ") or 0)
+        for i, r in enumerate(resultados[:10]):
+            p = r.get('performers', [])
+            a = p[0]['name'] if p else "N/A"
+            s = r.get('site', {}).get('name', 'N/A')
+            print(f"{i+1:<3} | {r['date']:<10} | {s[:15]:<15} | {a[:15]:<15} | {r['title']}")
+        sel = int(input("\nSelecciona (0 para cancelar): ") or 0)
         if sel == 0: return
-        escena = validos[sel-1]
+        escena = resultados[sel-1]
     else:
-        escena = validos[0]
+        escena = resultados[0]
 
-    # Procesamiento final (Pósters y Renombrado)
-    estudio_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
-    fecha_api = escena.get('date', '0000-00-00').replace('-', '.')
-    titulo_api = escena.get('title', 'N/A')
-    perfs_api = escena.get('performers', [])
-    actriz_api = f" - {perfs_api[0]['name']}" if perfs_api else ""
+    # Datos API
+    est_api = escena.get('site', {}).get('name', info['estudio_busqueda'])
+    fec_api = escena.get('date', '0000-00-00').replace('-', '.')
+    tit_api = escena.get('title', 'N/A')
+    perf = escena.get('performers', [])
+    actriz = f" - {perf[0]['name']}" if perf else ""
 
-    nombre_f = re.sub(r'[\\/:*?"<>|]', '', f"{estudio_api} {fecha_api} {titulo_api}{actriz_api}")
-    prefijo = nombre_f if renombrar else info['original_base_name']
-
+    nombre_base = re.sub(r'[\\/:*?"<>|]', '', f"{est_api} {fec_api} {tit_api}{actriz}")
+    
+    # Nombre final conserva la extensión técnica original (.q20.mp4)
+    prefijo = nombre_base if renombrar else info['original_base_name']
+    
+    # 1. Posters
     img_url = escena.get('image')
     if img_url:
-        print(f"\n[+] ID: {escena['id']} | Descargando pósters...", end=' ', flush=True)
         img_data = requests.get(img_url).content
         ext_img = os.path.splitext(img_url.split('?')[0])[1] or ".jpg"
         for sufijo in ["", "-fanart"]:
-            with open(os.path.join(info['directorio'], f"{prefijo}{sufijo}{ext_img}"), 'wb') as f:
+            # El poster también conserva la "doble extensión" si renombras
+            # Ejemplo: Estudio...q20.jpg
+            ext_tecnica = info['extension_completa'].rsplit('.', 1)[0] if renombrar else ""
+            nom_img = f"{prefijo}{sufijo}{ext_img}"
+            with open(os.path.join(info['directorio'], nom_img), 'wb') as f:
                 f.write(img_data)
-        print("OK.")
+        print("[+] Imágenes guardadas.")
 
+    # 2. Renombrar
     if renombrar:
-        nueva_ruta = os.path.join(info['directorio'], f"{nombre_f}{info['extension_video']}")
+        nueva_ruta = os.path.join(info['directorio'], f"{nombre_base}{info['extension_completa']}")
         if info['original_full_path'] != nueva_ruta:
-            print(f"[*] Renombrando a: {nombre_f}{info['extension_video']}")
             os.rename(info['original_full_path'], nueva_ruta)
+            print(f"[+] Renombrado a: {nombre_base}{info['extension_completa']}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

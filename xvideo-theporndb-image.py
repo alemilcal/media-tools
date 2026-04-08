@@ -13,25 +13,26 @@ SEARCH_URL = "https://api.theporndb.net/scenes"
 
 def limpiar_basura(texto):
     if not texto: return ""
+    # Tags técnicos muy agresivos para VR y ripeos
     tags = [
         r'\b\d{3,4}p\b', r'\b(480|720|1080|2160)\b', r'\b\d[kK]\b', 
         r'\bx26[45]\b', r'\bhevc\b', r'\bbrrip\b', r'\bwebrip\b', 
-        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR'
+        r'\bq\d{2}\b', r'\bpart\d\b', r'_180_3D_LR', 
+        r'\b180x180\b', r'\b3dh\b', r'\b180\b', r'\bvr\b'
     ]
     for tag in tags:
         texto = re.sub(tag, '', texto, flags=re.IGNORECASE)
+    
+    # Reemplazar guiones bajos y puntos por espacios ANTES de limpiar espacios
     texto = re.sub(r'[\(\)\[\]\._\-]', ' ', texto)
     return " ".join(texto.split()).strip()
 
 def extraer_datos_locales(ruta_completa, sitio_forzado=None):
     path_abs = os.path.abspath(ruta_completa)
-    
-    # 1. ESTUDIO: Forzado o por carpeta
-    estudio_final = sitio_forzado if sitio_forzado else os.path.basename(os.path.dirname(path_abs))
-    
+    estudio_orig = sitio_forzado if sitio_forzado else os.path.basename(os.path.dirname(path_abs))
     nombre_archivo = os.path.basename(path_abs)
     
-    # 2. EXTENSIÓN Y TAG TÉCNICO
+    # 1. Captura de extensión y etiqueta técnica
     match_ext = re.search(r'\.([a-z0-9]+)\.(mp4|mkv|avi|wmv|mov|flv)$', nombre_archivo, flags=re.IGNORECASE)
     if match_ext:
         tag_tecnico_api = f" [{match_ext.group(1).upper()}]"
@@ -43,9 +44,20 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
         sufijo_original = ""
         nombre_sin_ext, ext_video = os.path.splitext(nombre_archivo)
     
-    nombre_sin_ext = re.sub(r'_180_3D_LR', '', nombre_sin_ext, flags=re.IGNORECASE)
+    # 2. Limpieza de título
+    estudio_busqueda = limpiar_basura(estudio_orig)
+    titulo_limpio = limpiar_basura(nombre_sin_ext)
+    
+    # REMOVER EL ESTUDIO DEL TÍTULO (Clave para BadoinkVR y similares)
+    # Si el título empieza por el nombre del estudio, lo quitamos
+    pattern_estudio = re.compile(re.escape(estudio_busqueda).replace(r'\ ', r'\s?'), re.IGNORECASE)
+    titulo_busqueda = pattern_estudio.sub('', titulo_limpio).strip()
+    
+    # Si al quitar el estudio nos quedamos sin título, volvemos al limpio
+    if not titulo_busqueda:
+        titulo_busqueda = titulo_limpio
 
-    # 3. FECHA
+    # 3. Fecha
     patron_fecha = r'(\d{4})[\.\-_\s]?(\d{2})[\.\-_\s]?(\d{2})|(\d{2})[\.\-_\s](\d{2})[\.\-_\s](\d{4}|\d{2})'
     match_f = re.search(patron_fecha, nombre_sin_ext)
     fecha_norm = None
@@ -57,9 +69,9 @@ def extraer_datos_locales(ruta_completa, sitio_forzado=None):
             fecha_norm = f"{año}-{g[4].zfill(2)}-{g[3].zfill(2)}"
 
     return {
-        "estudio_busqueda": limpiar_basura(estudio_final),
+        "estudio_busqueda": estudio_busqueda,
         "fecha": fecha_norm,
-        "titulo_busqueda": limpiar_basura(nombre_sin_ext),
+        "titulo_busqueda": titulo_busqueda,
         "original_full_path": path_abs,
         "original_base_name": nombre_sin_ext.strip(),
         "ext_video": ext_video,
@@ -72,16 +84,20 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
     info = extraer_datos_locales(archivo_input, sitio_forzado)
     headers = {"Authorization": f"Bearer {API_KEY}", "Accept": "application/json", "User-Agent": "Mozilla/5.0"}
     
-    print(f"[*] PROCESANDO: {info['original_base_name']}")
-    print(f"[*] ESTUDIO:    {info['estudio_busqueda']}")
+    print(f"[*] ARCHIVO: {info['original_base_name']}")
+    print(f"[*] BUSCANDO: Site='{info['estudio_busqueda']}' | Query='{info['titulo_busqueda']}'")
 
     params = {"site": info['estudio_busqueda'], "q": info['titulo_busqueda']}
     if info['fecha']: params["date"] = info['fecha']
     
     try:
-        res = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12).json().get('data', [])
-        if not res: res = requests.get(SEARCH_URL, headers=headers, params={"q": info['titulo_busqueda']}).json().get('data', [])
+        resp = requests.get(SEARCH_URL, headers=headers, params=params, timeout=12)
+        res = resp.json().get('data', [])
         
+        # Si falla, reintento sin estudio en la query (solo filtro site)
+        if not res:
+            res = requests.get(SEARCH_URL, headers=headers, params={"q": info['titulo_busqueda']}).json().get('data', [])
+
         if not res:
             print("[!] Sin resultados.")
             return
@@ -126,7 +142,6 @@ def ejecutar(archivo_input, interactivo=False, renombrar=False, es_vr=False, sit
                     f.write(img_res.content)
             print("OK.")
 
-        # Renombrar vídeo
         if renombrar:
             nueva_ruta = os.path.join(info['directorio'], f"{nombre_base_f}{info['ext_video']}")
             os.rename(info['original_full_path'], nueva_ruta)

@@ -291,8 +291,10 @@ def convert_ass_to_srt(input_file, output_file):
 
     # CLIPPING (Criterio: No solapamiento)
     for i in range(len(subs) - 1):
-        if subs[i]["end"] > subs[i + 1]["start"]:
-            subs[i]["end"] = subs[i + 1]["start"]
+        #if subs[i]["end"] > subs[i + 1]["start"]:
+        #    subs[i]["end"] = subs[i + 1]["start"]
+        if subs[i]["end"] >= subs[i + 1]["start"]:
+            subs[i]["end"] = max(subs[i]["start"], subs[i + 1]["start"] - 1)
         min_duration = 3 * len(subs[i]["text"])
         if subs[i]["end"] - subs[i]["start"] < min_duration:
             subs[i]["end"] = subs[i]["start"] + min_duration

@@ -160,21 +160,38 @@ def process_text_logic(raw_text, style, style_italic):
     clean_text = RE_TAGS.sub("", raw_text).strip()
 
     # 2. FILTRO: Si está posicionado (\pos o \an) y es muy corto (letras/carteles) -> ELIMINAR
-    if (
-        ("\\pos" in raw_text or "\\an" in raw_text or "\\p1" in raw_text)
-        and len(clean_text) <= 3
-    ) or (
-        clean_text
-        and all(
-            (len(w) == 1 and w.isalpha()) or re.fullmatch(r"-?\d+(\.\d+)?", w)
-            for w in clean_text.split()
-        )
-    ):
+    # if (
+    #     ("\\pos" in raw_text or "\\an" in raw_text or "\\p1" in raw_text)
+    #     and len(clean_text) <= 3
+    # ) or (
+    #     clean_text
+    #     and all(
+    #         (len(w) == 1 and w.isalpha()) or re.fullmatch(r"-?\d+(\.\d+)?", w)
+    #         for w in clean_text.split()
+    #     )
+    # ):
+    #     return None
+    # 2. FILTRO: Si es un dibujo (\p1), cartel posicionado (\pos) o basura de karaoke
+    # Eliminamos si es un comando de dibujo (\p1) o si el texto es posicionado y muy corto
+    if "\\p1" in raw_text:
         return None
+
+    if (("\\pos" in raw_text or "\\an" in raw_text) and len(clean_text) <= 3):
+        return None
+
+    # Filtro de "basura": si la mayoría de las palabras son letras sueltas o números (dibujos residuales)
+    palabras = clean_text.split()
+    if palabras:
+        es_basura = all(
+            len(w) <= 2 or w.isdigit() or re.fullmatch(r"-?\d+(\.\d+)?", w)
+            for w in palabras
+        )
+        if es_basura:
+            return None
 
     # 3. FORMATO: Si tiene \pos, envolver en corchetes
     if "\\pos" in raw_text and len(clean_text) > 0:
-        clean_text = f"[{clean_text}]"
+        clean_text = f"[{clean_text.upper()}]"
 
     # 4. CURSIVAS: Por etiqueta o por estilo
     if RE_ITALIC.search(raw_text) or style.lower() in style_italic:
@@ -185,7 +202,8 @@ def process_text_logic(raw_text, style, style_italic):
 
     # --- LIMPIEZA DE ESPACIOS PREVIA AL BALANCEO ---
     text = " ".join(text.split())
-
+    # AÑADE ESTAS DOS LÍNEAS AQUÍ PARA QUITAR ESPACIOS EN LOS CORCHETES
+    text = text.replace("[ ", "[").replace(" ]", "]")
     # --- LLAMADA A LA FUNCIÓN DE BALANCEO (AQUÍ) ---
     text = balancear_texto(text, 40)
 
@@ -269,25 +287,54 @@ def convert_ass_to_srt(input_file, output_file):
     subs = np.array(res_unificado, dtype=dt)
     subs.sort(order="start")
 
+    # # --- NUEVO BLOQUE DE UNIFICACIÓN POR INICIO IDÉNTICO ---
+    # res_mismo_inicio = []
+    # if len(subs) > 0:
+    #     curr = subs[0].copy()
+    #     for i in range(1, len(subs)):
+    #         nxt = subs[i]
+    #         # Si empiezan exactamente en la misma centésima
+    #         if nxt["start"] == curr["start"]:
+    #             # Unimos los textos con un salto de línea
+    #             if nxt["text"] != curr["text"]:
+    #                 curr["text"] = f"{curr['text']}\n{nxt['text']}"
+    #             # Nos quedamos con el final del que dure más
+    #             curr["end"] = max(curr["end"], nxt["end"])
+    #         else:
+    #             res_mismo_inicio.append(curr)
+    #             curr = nxt.copy()
+    #     res_mismo_inicio.append(curr)
+    #     subs = np.array(res_mismo_inicio, dtype=dt)
+    # # --- FIN DEL BLOQUE ---
     # --- NUEVO BLOQUE DE UNIFICACIÓN POR INICIO IDÉNTICO ---
     res_mismo_inicio = []
     if len(subs) > 0:
         curr = subs[0].copy()
         for i in range(1, len(subs)):
             nxt = subs[i]
-            # Si empiezan exactamente en la misma centésima
             if nxt["start"] == curr["start"]:
-                # Unimos los textos con un salto de línea
                 if nxt["text"] != curr["text"]:
-                    curr["text"] = f"{curr['text']}\n{nxt['text']}"
-                # Nos quedamos con el final del que dure más
+                    # Detectamos si alguno de los dos era posicionado
+                    usa_brackets = curr["text"].startswith("[") or nxt["text"].startswith("[")
+                    
+                    # Limpiamos los textos de corchetes existentes
+                    t1 = curr["text"].strip("[]")
+                    t2 = nxt["text"].strip("[]")
+                    
+                    unificado = f"{t1}\n{t2}"
+                    
+                    if usa_brackets:
+                        # Todo el bloque unificado en MAYÚSCULAS y con un solo juego de corchetes
+                        curr["text"] = f"[{unificado.upper()}]"
+                    else:
+                        curr["text"] = unificado
+                        
                 curr["end"] = max(curr["end"], nxt["end"])
             else:
                 res_mismo_inicio.append(curr)
                 curr = nxt.copy()
         res_mismo_inicio.append(curr)
         subs = np.array(res_mismo_inicio, dtype=dt)
-    # --- FIN DEL BLOQUE ---
 
     # CLIPPING (Criterio: No solapamiento)
     for i in range(len(subs) - 1):

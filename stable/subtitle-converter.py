@@ -62,6 +62,8 @@ def textClean(text):
     r = r.replace("\u2018", "'").replace("\u2019", "'")
     # También existen estas comillas bajas que se usan a veces:
     r = r.replace("\u201e", '"')
+    # Triple punto (elipsis)
+    r = r.replace("\u2026", '...')
 
     # Continuar con el resto...
     r = re.compile(
@@ -267,10 +269,32 @@ def convert_ass_to_srt(input_file, output_file):
     subs = np.array(res_unificado, dtype=dt)
     subs.sort(order="start")
 
+    # --- NUEVO BLOQUE DE UNIFICACIÓN POR INICIO IDÉNTICO ---
+    res_mismo_inicio = []
+    if len(subs) > 0:
+        curr = subs[0].copy()
+        for i in range(1, len(subs)):
+            nxt = subs[i]
+            # Si empiezan exactamente en la misma centésima
+            if nxt["start"] == curr["start"]:
+                # Unimos los textos con un salto de línea
+                if nxt["text"] != curr["text"]:
+                    curr["text"] = f"{curr['text']}\n{nxt['text']}"
+                # Nos quedamos con el final del que dure más
+                curr["end"] = max(curr["end"], nxt["end"])
+            else:
+                res_mismo_inicio.append(curr)
+                curr = nxt.copy()
+        res_mismo_inicio.append(curr)
+        subs = np.array(res_mismo_inicio, dtype=dt)
+    # --- FIN DEL BLOQUE ---
+
     # CLIPPING (Criterio: No solapamiento)
     for i in range(len(subs) - 1):
-        if subs[i]["end"] > subs[i + 1]["start"]:
-            subs[i]["end"] = subs[i + 1]["start"]
+        #if subs[i]["end"] > subs[i + 1]["start"]:
+        #    subs[i]["end"] = subs[i + 1]["start"]
+        if subs[i]["end"] >= subs[i + 1]["start"]:
+            subs[i]["end"] = min(subs[i]["end"], subs[i + 1]["start"] - 1)
         min_duration = 3 * len(subs[i]["text"])
         if subs[i]["end"] - subs[i]["start"] < min_duration:
             subs[i]["end"] = subs[i]["start"] + min_duration

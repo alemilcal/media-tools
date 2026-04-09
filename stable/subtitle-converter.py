@@ -130,7 +130,7 @@ def balancear_texto(texto, limite_max=40):
 
 
 def time_to_cs(t_str):
-    """Convierte tiempo ASS a centésimas, respetando el formato original."""
+    r"""Convierte tiempo ASS a centésimas, respetando el formato original."""
     t_str = t_str.strip().replace(",", ".")
     parts = t_str.split(":")
     h, m = int(parts[0]), int(parts[1])
@@ -145,7 +145,7 @@ def time_to_cs(t_str):
 
 
 def cs_to_srt_time(cs):
-    """Formato SRT estándar HH:MM:SS,mmm"""
+    r"""Formato SRT estándar HH:MM:SS,mmm"""
     h = cs // 360000
     m = (cs % 360000) // 6000
     s = (cs % 6000) // 100
@@ -271,8 +271,16 @@ def convert_ass_to_srt(input_file, output_file):
     for i in range(len(subs) - 1):
         if subs[i]["end"] > subs[i + 1]["start"]:
             subs[i]["end"] = subs[i + 1]["start"]
-        if subs[i]["end"] - subs[i]["start"] < 100:
-            subs[i]["end"] = subs[i]["start"] + 100
+        min_duration = 3 * len(subs[i]["text"])
+        if subs[i]["end"] - subs[i]["start"] < min_duration:
+            subs[i]["end"] = subs[i]["start"] + min_duration
+
+    # Enforce minimum for the last subtitle
+    if len(subs) > 0:
+        i = len(subs) - 1
+        min_duration = math.ceil(0.3 * len(subs[i]["text"]))
+        if subs[i]["end"] - subs[i]["start"] < min_duration:
+            subs[i]["end"] = subs[i]["start"] + min_duration
 
     # DURACIÓN MÍNIMA (Criterio 2: 1cs)
     subs = subs[(subs["end"] - subs["start"]) >= 1]

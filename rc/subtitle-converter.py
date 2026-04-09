@@ -267,6 +267,26 @@ def convert_ass_to_srt(input_file, output_file):
     subs = np.array(res_unificado, dtype=dt)
     subs.sort(order="start")
 
+    # --- INSERTAR AQUÍ: FUSIÓN DE COLISIONES PARA ROKU ---
+    subs.sort(order='start')
+    res_fusionado = []
+    if len(subs) > 0:
+        curr = subs[0].copy()
+        for i in range(1, len(subs)):
+            nxt = subs[i]
+            # Si el siguiente empieza antes de que acabe el actual (solapamiento)
+            if nxt['start'] < curr['end']:
+                # Si los textos son distintos, los unimos en el mismo bloque
+                if nxt['text'] != curr['text']:
+                    curr['text'] = f"{curr['text']}\n{nxt['text']}"
+                curr['end'] = max(curr['end'], nxt['end'])
+            else:
+                res_fusionado.append(curr)
+                curr = nxt.copy()
+        res_fusionado.append(curr)
+        subs = np.array(res_fusionado, dtype=dt)
+    # --- FIN DE LA INSERCIÓN ---
+
     # CLIPPING (Criterio: No solapamiento)
     for i in range(len(subs) - 1):
         if subs[i]["end"] > subs[i + 1]["start"]:

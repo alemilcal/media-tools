@@ -205,7 +205,7 @@ def process_text_logic(raw_text, style, style_italic):
     # AÑADE ESTAS DOS LÍNEAS AQUÍ PARA QUITAR ESPACIOS EN LOS CORCHETES
     text = text.replace("[ ", "[").replace(" ]", "]")
     # --- LLAMADA A LA FUNCIÓN DE BALANCEO (AQUÍ) ---
-    text = balancear_texto(text, 40)
+    text = balancear_texto(text)
 
     # 6. MANEJO DE GUIONES (Después del balanceo para que manden)
     text = text.replace(" - ", "\n-").replace(" -", "\n-")
@@ -355,6 +355,13 @@ def convert_ass_to_srt(input_file, output_file):
 
     # DURACIÓN MÍNIMA (Criterio 2: 1cs)
     subs = subs[(subs["end"] - subs["start"]) >= 1]
+
+    # RE-BALANCEO FINAL: Para que los bloques unidos queden bien cuadrados
+    for i in range(len(subs)):
+        # Quitamos los \n actuales para que el balanceador calcule de nuevo
+        texto_sucio = subs[i]["text"].replace("\n", " ")
+        # Si tiene corchetes, los respetamos al balancear
+        subs[i]["text"] = balancear_texto(texto_sucio)
 
     # ESCRITURA SRT
     with open(output_file, "w", encoding="utf-8") as f:
